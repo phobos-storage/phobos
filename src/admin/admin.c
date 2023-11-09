@@ -456,6 +456,10 @@ int phobos_admin_init(struct admin_handle *adm, bool lrs_required,
     union pho_comm_addr tlc_sock_addr;
     int rc;
 
+    rc = pho_context_init();
+    if (rc)
+        return rc;
+
     memset(adm, 0, sizeof(*adm));
     adm->phobosd_comm = pho_comm_info_init();
     adm->tlc_comm = pho_comm_info_init();
