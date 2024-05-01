@@ -426,7 +426,7 @@ class Migrator:
             CREATE TABLE extent (
                 extent_uuid     varchar(36) UNIQUE DEFAULT uuid_generate_v4(),
                 state           extent_state,
-                size            integer,
+                size            bigint,
                 medium_family   dev_family,
                 medium_id       varchar(255),
                 address         varchar(1024),
@@ -444,7 +444,7 @@ class Migrator:
                                 object_uuid, object_version, lyt_index)
                 SELECT uuid_generate_v4(),
                        state,
-                       cast(value->>'sz' AS integer),
+                       cast(value->>'sz' AS bigint),
                        cast(value->>'fam' AS dev_family),
                        value->>'media',
                        value->>'addr',
