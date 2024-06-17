@@ -33,6 +33,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <net/if.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -197,12 +198,35 @@ static int tcp_set_socket_addr_path(const union pho_comm_addr *addr,
     return 0;
 
 out_err:
-    freeaddrinfo(*addr_res);
+    if (*addr_res)
+        freeaddrinfo(*addr_res);
     *addr_res = NULL;
     *socka = NULL;
     close(*socket_fd);
     *socket_fd = -1;
     return rc;
+}
+
+static int tcp_set_socket_listen_interface(int socket_fd,
+                                           const union pho_comm_addr *addr)
+{
+    int rc;
+    struct ifreq interface;
+
+    if (!addr->tcp.interface)
+        return 0;
+
+    rc = snprintf(interface.ifr_name, IFNAMSIZ, "%s", addr->tcp.interface);
+    if (rc >= IFNAMSIZ)
+        LOG_RETURN(-ERANGE, "Interface name '%s' does not fit in %d bytes",
+                   addr->tcp.interface, IFNAMSIZ);
+
+    rc = setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &interface,
+                    sizeof(interface));
+    if (rc < 0)
+        LOG_RETURN(-errno, "Could not bind socket to interface '%s'",
+                   addr->tcp.interface);
+    return 0;
 }
 
 int pho_comm_open(struct pho_comm_info *ci, const union pho_comm_addr *addr,
@@ -247,7 +271,7 @@ int pho_comm_open(struct pho_comm_info *ci, const union pho_comm_addr *addr,
             LOG_GOTO(out_err, rc = -errno,
                      "Socket connection(%s) failed", ci->path);
 
-        if (type == PHO_COMM_TCP_CLIENT)
+        if (addr_res)
             freeaddrinfo(addr_res);
 
         return 0;
@@ -268,7 +292,13 @@ int pho_comm_open(struct pho_comm_info *ci, const union pho_comm_addr *addr,
         LOG_GOTO(out_err, rc = -errno,
                  "Socket binding(%s) failed", ci->path);
 
-    freeaddrinfo(addr_res);
+    if (addr_res) {
+        freeaddrinfo(addr_res);
+        addr_res = NULL;
+    }
+
+    /* ignore errors */
+    tcp_set_socket_listen_interface(ci->socket_fd, addr);
 
     if (listen(ci->socket_fd, n_max_listen))
         LOG_GOTO(out_err, rc = -errno, "Socket listening failed");
@@ -287,7 +317,8 @@ int pho_comm_open(struct pho_comm_info *ci, const union pho_comm_addr *addr,
     return 0;
 
 out_err:
-    freeaddrinfo(addr_res);
+    if (addr_res)
+        freeaddrinfo(addr_res);
     if (ci->epoll_fd != -1) {
         close(ci->epoll_fd);
         ci->epoll_fd = -1;
