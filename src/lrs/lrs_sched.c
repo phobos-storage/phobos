@@ -1940,7 +1940,6 @@ static int sched_handle_write_alloc(struct lrs_sched *sched,
             break;
     }
 
-end:
     return publish_or_cancel(sched, reqc, rc, next_medium_index);
 }
 
