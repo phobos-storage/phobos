@@ -26,6 +26,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 
+#include "lrs_cfg.h"
 #include "lrs_device.h"
 #include "lrs_sched.h"
 #include "pho_cfg.h"
@@ -141,19 +142,116 @@ static int fifo_requeue(struct io_scheduler *io_sched,
     return 0;
 }
 
-static int fifo_peek_request(struct io_scheduler *io_sched,
-                             struct req_container **reqc)
+static int max_write_per_grouping(void)
 {
+    static int concurrent_write_per_grouping = -1;
+
+    if (concurrent_write_per_grouping == -1) {
+        concurrent_write_per_grouping =
+            PHO_CFG_GET_INT(cfg_lrs, PHO_CFG_LRS, fifo_max_write_per_grouping,
+                            0);
+        if (concurrent_write_per_grouping < 0) {
+            pho_error(-EINVAL,
+                      "fifo_max_write_per_grouping config value must be a "
+                      "positive integer. Instead we found %d and we fall back "
+                      "to the default no limit '0' value",
+                      concurrent_write_per_grouping);
+            concurrent_write_per_grouping = 0;
+        }
+    }
+
+    return concurrent_write_per_grouping;
+}
+
+static gint g_cmp_int(gconstpointer _a, gconstpointer _b)
+{
+    const gint *a = _a;
+    const gint *b = _b;
+
+    return *a - *b;
+}
+
+static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
+                                                        const char *grouping,
+                                                        int max_grouping)
+{
+    GArray *socket_id_array = g_array_sized_new(FALSE, FALSE, sizeof(int),
+                                                max_grouping - 1);
+    int nb_write = 0;
+    int i;
+
+    for (i = 0; i < devices->len; i++) {
+        struct lrs_dev *dev;
+
+        dev = g_ptr_array_index(devices, i);
+        MUTEX_LOCK(&dev->ld_mutex);
+        if ((dev && dev->ld_sub_request &&
+             pho_request_is_write(dev->ld_sub_request->reqc->req) &&
+             dev->ld_sub_request->reqc->req->walloc->grouping &&
+             !strcmp(dev->ld_sub_request->reqc->req->walloc->grouping,
+                     grouping) &&
+             !g_array_binary_search(socket_id_array,
+                                    &dev->ld_sub_request->reqc->socket_id,
+                                    g_cmp_int, NULL)) ||
+            (dev && dev->ld_ongoing_io && dev->ld_ongoing_grouping.grouping &&
+             !strcmp(dev->ld_ongoing_grouping.grouping, grouping) &&
+             !g_array_binary_search(socket_id_array,
+                                    &dev->ld_ongoing_grouping.socket_id,
+                                    g_cmp_int, NULL))) {
+            nb_write++;
+            if (nb_write >= max_grouping) {
+                MUTEX_UNLOCK(&dev->ld_mutex);
+                g_array_unref(socket_id_array);
+                return true;
+            }
+
+            g_array_append_vals(socket_id_array,
+                                dev->ld_sub_request ?
+                                    &dev->ld_sub_request->reqc->socket_id :
+                                    &dev->ld_ongoing_grouping.socket_id, 1);
+        }
+
+        MUTEX_UNLOCK(&dev->ld_mutex);
+    }
+
+    g_array_unref(socket_id_array);
+    return false;
+}
+
+
+static int fifo_limited_grouping_peek_request(struct io_scheduler *io_sched,
+                                              struct req_container **reqc)
+{
+    GQueue *queue = (GQueue *) io_sched->private_data;
+    GQueue *requeued_elem = g_queue_new();
     struct queue_element *elem;
 
-    elem = g_queue_peek_tail((GQueue *) io_sched->private_data);
+    elem = g_queue_peek_tail(queue);
+new_elem:
     if (!elem) {
         *reqc = NULL;
-        return 0;
+        goto requeue;
+    }
+
+    if (pho_request_is_write(elem->reqc->req) &&
+        elem->reqc->req->walloc->grouping && max_write_per_grouping() > 0 &&
+        current_write_per_grouping_greater_than_max(io_sched->devices,
+            elem->reqc->req->walloc->grouping, max_write_per_grouping())) {
+        g_queue_push_head(requeued_elem, g_queue_pop_tail(queue));
+        elem = g_queue_peek_tail(queue);
+        goto new_elem;
     }
 
     *reqc = elem->reqc;
 
+requeue:
+    elem = g_queue_pop_tail(requeued_elem);
+    while (elem) {
+        g_queue_push_head(queue, elem);
+        elem = g_queue_pop_tail(requeued_elem);
+    }
+
+    g_queue_free(requeued_elem);
     return 0;
 }
 
@@ -622,7 +720,7 @@ struct io_scheduler_ops IO_SCHED_FIFO_OPS = {
     .push_request           = fifo_push_request,
     .remove_request         = fifo_remove_request,
     .requeue                = fifo_requeue,
-    .peek_request           = fifo_peek_request,
+    .peek_request           = fifo_limited_grouping_peek_request,
     .get_device_medium_pair = fifo_get_device_medium_pair,
     .retry                  = fifo_retry,
     .add_device             = fifo_add_device,
