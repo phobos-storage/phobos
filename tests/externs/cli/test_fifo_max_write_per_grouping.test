@@ -42,12 +42,14 @@ function setup()
 
     setup_test_dirs
     setup_dummy_files 3 1k 1
-    DIRS=()
-    for i in `seq 0 2`; do
-        DIRS+=($(mktemp -d ${DIR_TEST}/dir_XXXX))
-        $phobos dir add ${DIRS[$i]}
-        $phobos dir format --unlock ${DIRS[$i]}
-    done
+    DIRS=(
+        $(mktemp -d ${DIR_TEST}/dir_XXXX)
+        $(mktemp -d ${DIR_TEST}/dir_XXXX)
+        $(mktemp -d ${DIR_TEST}/dir_XXXX)
+    )
+
+    $phobos dir add ${DIRS[@]}
+    $phobos dir format --unlock ${DIRS[@]}
 }
 
 function cleanup() {
@@ -111,13 +113,6 @@ function put_check_grouping() {
 }
 
 function test_max_grouping_dir() {
-    DIRS=()
-    for i in `seq 0 2`; do
-        DIRS+=($(mktemp -d ${DIR_TEST}/dir_XXXX))
-        $phobos dir add ${DIRS[$i]}
-        $phobos dir format --unlock ${DIRS[$i]}
-    done
-
     put_check_grouping dir 1
     put_check_grouping dir 2
     put_check_grouping dir 3

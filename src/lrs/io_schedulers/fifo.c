@@ -185,7 +185,7 @@ static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
 
         dev = g_ptr_array_index(devices, i);
         MUTEX_LOCK(&dev->ld_mutex);
-        if ((dev && dev->ld_sub_request &&
+        if ((dev->ld_sub_request &&
              pho_request_is_write(dev->ld_sub_request->reqc->req) &&
              dev->ld_sub_request->reqc->req->walloc->grouping &&
              !strcmp(dev->ld_sub_request->reqc->req->walloc->grouping,
@@ -193,7 +193,7 @@ static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
              !g_array_binary_search(socket_id_array,
                                     &dev->ld_sub_request->reqc->socket_id,
                                     g_cmp_int, NULL)) ||
-            (dev && dev->ld_ongoing_io && dev->ld_ongoing_grouping.grouping &&
+            (dev->ld_ongoing_io && dev->ld_ongoing_grouping.grouping &&
              !strcmp(dev->ld_ongoing_grouping.grouping, grouping) &&
              !g_array_binary_search(socket_id_array,
                                     &dev->ld_ongoing_grouping.socket_id,
@@ -226,8 +226,8 @@ static int fifo_limited_grouping_peek_request(struct io_scheduler *io_sched,
     GQueue *requeued_elem = g_queue_new();
     struct queue_element *elem;
 
-    elem = g_queue_peek_tail(queue);
 new_elem:
+    elem = g_queue_peek_tail(queue);
     if (!elem) {
         *reqc = NULL;
         goto requeue;
@@ -238,7 +238,6 @@ new_elem:
         current_write_per_grouping_greater_than_max(io_sched->devices,
             elem->reqc->req->walloc->grouping, max_write_per_grouping())) {
         g_queue_push_head(requeued_elem, g_queue_pop_tail(queue));
-        elem = g_queue_peek_tail(queue);
         goto new_elem;
     }
 

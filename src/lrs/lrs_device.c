@@ -1801,7 +1801,8 @@ out_free:
     if (!io_ended && !sub_request_requeued) {
         dev->ld_ongoing_io = true;
         if (grouping) {
-            dev->ld_ongoing_grouping.grouping = xstrdup(grouping);
+            dev->ld_ongoing_grouping.grouping = grouping;
+            grouping = NULL;
             dev->ld_ongoing_grouping.socket_id = socket_id;
         }
     }
