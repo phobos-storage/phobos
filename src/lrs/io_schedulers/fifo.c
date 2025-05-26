@@ -152,11 +152,11 @@ static int max_write_per_grouping(void)
                             0);
         if (concurrent_write_per_grouping < 0) {
             pho_error(-EINVAL,
-                      "fifo_max_write_per_grouping config value must be a "
-                      "positive integer. Instead we found %d and we fall back "
-                      "to the default no limit '0' value",
+                      "fifo_max_write_per_grouping config value must be a null "
+                      "or positive integer. Instead we found %d",
                       concurrent_write_per_grouping);
-            concurrent_write_per_grouping = 0;
+            concurrent_write_per_grouping = -1;
+            return -EINVAL;
         }
     }
 
@@ -225,6 +225,7 @@ static int fifo_limited_grouping_peek_request(struct io_scheduler *io_sched,
     GQueue *queue = (GQueue *) io_sched->private_data;
     GQueue *requeued_elem = g_queue_new();
     struct queue_element *elem;
+    int rc = 0;
 
 new_elem:
     elem = g_queue_peek_tail(queue);
@@ -234,11 +235,20 @@ new_elem:
     }
 
     if (pho_request_is_write(elem->reqc->req) &&
-        elem->reqc->req->walloc->grouping && max_write_per_grouping() > 0 &&
-        current_write_per_grouping_greater_than_max(io_sched->devices,
-            elem->reqc->req->walloc->grouping, max_write_per_grouping())) {
-        g_queue_push_head(requeued_elem, g_queue_pop_tail(queue));
-        goto new_elem;
+        elem->reqc->req->walloc->grouping) {
+        int cfg_max_write_per_grouping = max_write_per_grouping();
+
+        if (cfg_max_write_per_grouping < 0) {
+            rc = cfg_max_write_per_grouping;
+            goto requeue;
+        }
+
+        if (cfg_max_write_per_grouping > 0 &&
+            current_write_per_grouping_greater_than_max(io_sched->devices,
+                elem->reqc->req->walloc->grouping, cfg_max_write_per_grouping)) {
+            g_queue_push_head(requeued_elem, g_queue_pop_tail(queue));
+            goto new_elem;
+        }
     }
 
     *reqc = elem->reqc;
@@ -251,7 +261,7 @@ requeue:
     }
 
     g_queue_free(requeued_elem);
-    return 0;
+    return rc;
 }
 
 /* find a device that can be allocated now */
