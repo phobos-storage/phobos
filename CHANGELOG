@@ -1,5 +1,8 @@
 # CHANGELOG UPDATES
 
+## next
+ * WARNING: the db schema moves from 3.0 to 3.2 and a migration is needed
+
 ## 3.1.0
  * limited number of write per grouping: the new "fifo_max_write_per_grouping"
    configuration parameter allows to limit the number of concurrent writes per
