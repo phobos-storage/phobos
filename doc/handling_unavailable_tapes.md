@@ -7,8 +7,8 @@ gracefully is important for both administrators and users.
 
 ## Phobos side
 
-On Phobos's side, there are 4 steps to declaring a tape lost, ensuring Phobos
-won't use it again, and handling the objects that may not be available anymore.
+On Phobos' side, there are 4 steps to declare a tape lost, ensure Phobos will
+not use it again, and handle the objects that may not be available anymore.
 
 ### First step
 
@@ -16,17 +16,19 @@ For Phobos, a tape becoming unavailable means a medium becomes unavailable, and
 thus all the data stored on it cannot be accessed anymore. At this point, the
 first thing to do is to prevent Phobos from trying to use that tape, which is
 done by using the `lock` command as such:
+
 ```
 phobos tape lock <tape label>
 ```
 
-With this, if a client tries to get an object or copy whose's content is only
+With this, if a client tries to get an object or copy whose content is only
 available on that tape will get an error.
 
 ### Second step
 
 Next, we must try and prevent access to those objects, which can only be done
 by first retrieving the list of extents that are stored on the tape:
+
 ```
 phobos extent list --output all <tape label>
 ```
@@ -44,19 +46,20 @@ get this list. See the (future features)[#future-features] section.
 The only way to do it currently is to, for each object and copy for that
 object, determine if they are still readable even though the extent on that
 tape has been removed, which depends on the layout. This check can be done using
-Phobos's `copy list` and `extent list` commands.
+Phobos' `copy list` and `extent list` commands.
 
 Then, depending on the layout:
  - For RAID1 layouts, if the copy has a replica count superior to 1 and the
 other extents for that copy are on available media, the object is still
 readable.
- - For RAID4 layouts, if the two other extents for that copy has readable, then
+ - For RAID4 layouts, if the two other extents for that copy are readable, then
 the object is still readable.
  - Otherwise, the copy is considered unreadable. In that case, if the object has
 no other readable copy, then the object is also considered unreadable.
 
 When the list of unreadable objects is done, you must delete each one with the
 following command:
+
 ```
 phobos object delete --hard <object ID>
 ```
@@ -67,8 +70,7 @@ them anymore.
 Note: when deleting objects with extents on tape, Phobos will *not* actually
 delete the extents from the tape or from the database. For the latter, Phobos
 will simply change the extents' state to `orphan` (i.e. not related to any copy
-or object) in the database, and expect a later call to the garbage collector to
-delete the database's entry. For the former, the data is expected to be deleted
+or object) in the database. For the former, the data is expected to be deleted
 when running a `repack` operation on that tape.
 
 ### Fourth step (optional)
@@ -78,6 +80,7 @@ the database. At the time of writing this document, Phobos has no mechanism to
 delete an extent from the database, so this step must be done manually.
 
 You must first access the PSQL database, and then run the following command:
+
 ```
 DELETE FROM extent WHERE state = 'orphan' AND medium_id = '<tape label>';
 ```
@@ -96,6 +99,7 @@ third step) are HSM lost.
 To do so however, you need to get for each object the FID of their associated
 entry in the filesystem. Once done, simply use the following command for each
 entry:
+
 ```
 lfs hsm_set LOST <FID>
 ```
@@ -141,6 +145,7 @@ For the first state and second, Phobos cannot do anything.
 
 For the third state, you can add the tape back to the tape library, and try to
 use Phobos to format it again. You can do so with the following command:
+
 ```
 phobos tape format <tape label>
 ```
@@ -148,10 +153,11 @@ phobos tape format <tape label>
 If the command suceeds, then the tape will be inserted back into the system as
 a fresh new one, and Phobos may use it in the future to try and hold data.
 
-For the fourth state, ythe tape can be inserted back into Phobos as an already
+For the fourth state, the tape can be inserted back into Phobos as an already
 filled Phobos tape. However, you must ensure the extents have been properly
 deleted as explained in Phobos side's (fourth step)[#fourth-step]. Then, use
 the following command:
+
 ```
 phobos tape import <tape label>
 ```
@@ -170,6 +176,8 @@ the copy and object linked to it, while also showing if the copy and object are
 still readable or not (it is planned for version 3.2)
  - the `extent delete --orphan` command to automatically delete extents flagged
 as `orphan` in the database (it is planned for version 3.2)
+ - the garbage collector to automatically handle `orphan` extents and delete
+them from the database.
  - the `tape delete --lost` command to delete a tape from the database and
 handle the impacted extents, copies and objects accordingly
  - the `tape export` command to remove a tape from the system but handling it
