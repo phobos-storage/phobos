@@ -1944,7 +1944,7 @@ int phobos_admin_media_add(struct admin_handle *adm, struct media_info *med_ls,
 }
 
 int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
-                              int num_med, int *num_removed_med)
+                              int num_med, bool lost, int *num_removed_med)
 {
     struct media_info *media_res;
     struct media_info *media;
@@ -1953,6 +1953,8 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
     int ext_cnt;
     int rc;
     int i;
+
+    (void) lost;
 
     *num_removed_med = 0;
 

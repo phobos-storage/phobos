@@ -258,6 +258,7 @@ class MediaOptHandler(BaseResourceOptHandler):
     def delete_medium_and_device(self):
         """Delete a medium and device at once"""
         resources = self.params.get('res')
+        lost = self.params.get('lost')
         set_library(self)
         valid_count = 0
         rc = 0
@@ -270,7 +271,8 @@ class MediaOptHandler(BaseResourceOptHandler):
                         rc = adm.device_delete(self.family, [path],
                                                self.library)
                         device_is_del = True
-                        self.del_medium(adm, self.family, [path], self.library)
+                        self.del_medium(adm, self.family, [path], self.library,
+                                        lost)
                         valid_count += 1
                     except EnvironmentError as err:
                         self.logger.error(env_error_format(err))

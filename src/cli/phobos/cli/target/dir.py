@@ -83,8 +83,8 @@ class DirOptHandler(MediaOptHandler):
         """
         exec_add_dir_rados(self, PHO_RSC_DIR)
 
-    def del_medium(self, adm, family, resources, library):
-        adm.medium_delete(family, resources, library)
+    def del_medium(self, adm, family, resources, library, lost):
+        adm.medium_delete(family, resources, library, lost)
 
     def exec_delete(self):
         """
