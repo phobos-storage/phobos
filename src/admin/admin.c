@@ -48,6 +48,7 @@
 #include "pho_type_utils.h"
 
 #include "import.h"
+#include "lost.h"
 
 enum pho_cfg_params_admin {
     /* Actual admin parameters */
@@ -1954,8 +1955,6 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
     int rc;
     int i;
 
-    (void) lost;
-
     *num_removed_med = 0;
 
     media = xcalloc(num_med, sizeof(*media));
@@ -1986,7 +1985,7 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
             goto out_free;
 
         dss_res_free(ext_res, ext_cnt);
-        if (ext_cnt > 0) {
+        if (!lost && ext_cnt > 0) {
             pho_warn("Media (family '%s', name '%s', library '%s') contains "
                      "extents, so cannot be removed",
                      rsc_family2str(med_ids[i].family), med_ids[i].name,
@@ -2006,9 +2005,15 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
         LOG_GOTO(out_free, rc = -ENODEV,
                  "There are no available media to remove");
 
-    rc = dss_media_delete(&adm->dss, media, avail_media);
-    if (rc)
-        pho_error(rc, "Medium cannot be removed");
+    if (lost) {
+        rc = delete_media_and_extents(adm, media, avail_media);
+        if (rc)
+            pho_error(rc, "Failed to delete media and extents");
+    } else {
+        rc = dss_media_delete(&adm->dss, media, avail_media);
+        if (rc)
+            pho_error(rc, "Medium cannot be removed");
+    }
 
     *num_removed_med = avail_media;
 
