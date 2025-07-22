@@ -30,7 +30,7 @@ Next, we must try and prevent access to those objects, which can only be done
 by first retrieving the list of extents that are stored on the tape:
 
 ```
-phobos extent list --output all <tape label>
+phobos extent list --output all --name <tape label>
 ```
 
 This will show you the complete list of extents stored on that tape, and their
