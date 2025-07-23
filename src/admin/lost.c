@@ -23,15 +23,58 @@
  * \brief  Phobos admin source file for removal of lost media
  */
 
+#include "pho_types.h"
+
 #include "lost.h"
+
+static int get_extents_from_medium(struct dss_handle *dss,
+                                   struct pho_id *medium_id,
+                                   struct extent **extents,
+                                   int *extent_count)
+{
+    struct dss_filter filter;
+    int rc;
+
+    rc = dss_filter_build(&filter,
+                          "{\"$AND\": ["
+                          "  {\"DSS::EXT::medium_family\": \"%s\"},"
+                          "  {\"DSS::EXT::medium_id\": \"%s\"},"
+                          "  {\"DSS::EXT::medium_library\": \"%s\"}"
+                          "]}",
+                          rsc_family2str(medium_id->family),
+                          medium_id->name,
+                          medium_id->library);
+    if (rc)
+        LOG_RETURN(rc, "Failed to build filter for extent retrieval");
+
+    rc = dss_extent_get(dss, &filter, extents, extent_count);
+    dss_filter_free(&filter);
+    if (rc)
+        pho_error(rc,
+                  "Failed to retrieve (family '%s', name '%s', library '%s') extents",
+                  rsc_family2str(medium_id->family), medium_id->name,
+                  medium_id->library);
+
+    return rc;
+}
 
 int delete_media_and_extents(struct admin_handle *handle,
                              struct media_info *media_list,
                              int media_count)
 {
-    (void) handle;
-    (void) media_list;
-    (void) media_count;
+    int rc;
+    int i;
 
-    return ENOTSUP;
+    for (i = 0; i < media_count; i++) {
+        struct media_info *medium = &media_list[i];
+        struct extent *extents;
+        int extent_count;
+
+        rc = get_extents_from_medium(&handle->dss, &medium->rsc.id, &extents,
+                                     &extent_count);
+        if (rc)
+            return rc;
+    }
+
+    return 0;
 }
