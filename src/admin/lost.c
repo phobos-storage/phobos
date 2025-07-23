@@ -58,12 +58,34 @@ static int get_extents_from_medium(struct dss_handle *dss,
     return rc;
 }
 
+static int get_layout_from_extent(struct dss_handle *dss,
+                                  struct extent *extent,
+                                  struct layout_info **layout)
+{
+    struct dss_filter filter;
+    int layout_count;
+    int rc;
+
+    rc = dss_filter_build(&filter, "{\"DSS::LYT::extent_uuid\": \"%s\"}",
+                          extent->uuid);
+    if (rc)
+        LOG_RETURN(rc, "Failed to build filter for layout retrieval");
+
+    rc = dss_layout_get(dss, &filter, layout, &layout_count);
+    dss_filter_free(&filter);
+
+    assert(layout_count == 1);
+
+    return rc;
+}
+
 int delete_media_and_extents(struct admin_handle *handle,
                              struct media_info *media_list,
                              int media_count)
 {
     int rc;
     int i;
+    int j;
 
     for (i = 0; i < media_count; i++) {
         struct media_info *medium = &media_list[i];
@@ -74,6 +96,14 @@ int delete_media_and_extents(struct admin_handle *handle,
                                      &extent_count);
         if (rc)
             return rc;
+
+        for (j = 0; j < extent_count; j++) {
+            struct layout_info *layout;
+
+            rc = get_layout_from_extent(&handle->dss, &extents[j], &layout);
+            if (rc)
+                return rc;
+        }
     }
 
     return 0;
