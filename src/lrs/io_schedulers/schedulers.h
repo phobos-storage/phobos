@@ -29,6 +29,7 @@
 
 extern struct io_scheduler_ops IO_SCHED_FIFO_OPS;
 extern struct io_scheduler_ops IO_SCHED_GROUPED_READ_OPS;
+extern struct io_scheduler_ops IO_SCHED_GROUPED_WRITE_OPS;
 
 /********************************
  * Device dispatcher algorithms *

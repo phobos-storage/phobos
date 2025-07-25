@@ -58,6 +58,7 @@ enum io_schedulers {
     IO_SCHED_INVAL = -1,
     IO_SCHED_FIFO,
     IO_SCHED_GROUPED_READ,
+    IO_SCHED_GROUPED_WRITE,
 };
 
 /**
