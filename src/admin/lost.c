@@ -110,7 +110,15 @@ int delete_media_and_extents(struct admin_handle *handle,
             copy.version = layout->version;
             copy.copy_name = layout->copy_name;
 
-            (void) copy;
+            rc = dss_layout_delete(&handle->dss, layout, 1);
+            if (rc)
+                return rc;
+
+            rc = reconstruct_copy(handle, &copy);
+            if (rc)
+                return rc;
+
+            dss_res_free(layout, 1);
         }
     }
 
