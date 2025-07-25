@@ -25,6 +25,7 @@
 
 #include "pho_types.h"
 
+#include "import.h"
 #include "lost.h"
 
 static int get_extents_from_medium(struct dss_handle *dss,
@@ -99,10 +100,17 @@ int delete_media_and_extents(struct admin_handle *handle,
 
         for (j = 0; j < extent_count; j++) {
             struct layout_info *layout;
+            struct copy_info copy;
 
             rc = get_layout_from_extent(&handle->dss, &extents[j], &layout);
             if (rc)
                 return rc;
+
+            copy.object_uuid = layout->uuid;
+            copy.version = layout->version;
+            copy.copy_name = layout->copy_name;
+
+            (void) copy;
         }
     }
 
