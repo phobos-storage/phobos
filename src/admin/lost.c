@@ -120,7 +120,14 @@ int delete_media_and_extents(struct admin_handle *handle,
 
             dss_res_free(layout, 1);
         }
+
+        rc = dss_extent_delete(&handle->dss, extents, extent_count);
+        dss_res_free(extents, extent_count);
+        if (rc)
+            return rc;
     }
 
-    return 0;
+    rc = dss_media_delete(&handle->dss, media_list, media_count);
+
+    return rc;
 }
