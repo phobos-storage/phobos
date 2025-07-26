@@ -32,13 +32,149 @@
 /* Principle of the algorithm:
  */
 
+struct gw_request {
+    struct req_container *reqc;
+    /** Pointer to the queue containing this request */
+    struct gw_queue *queue;
+};
+
+struct gw_grouping {
+    /** Name of the grouping used as the key in gw_queue::grouping_index */
+    char *name;
+    /** List of struct gw_request for this grouping */
+    GQueue *requests;
+};
+
+/**
+ * All the requests in an instance of this structure must have the same tags.
+ * Requests are grouped and scheduled by number of drives required (e.g. RAID
+ * params).
+ *
+ * The queues are created when requests with new tags+RAID params are received
+ * and free'd when we need to switch queue. We can only switch queue when the
+ * list is empty.
+ */
+struct gw_queue {
+  /** Type of layout (e.g. RAID1, RAID4).
+   * For now, this will always be 0 but can be used in the future to
+   * differentiate between RAID1 repl_count=3 and RAID4.
+   */
+  int layout_type;
+  /** Number of media per request */
+  gint64 n_media;
+  /** comma seperated list of tags */
+  const char *tags;
+
+  /** List of struct gw_grouping in the order of each groupings' first request
+   * received by the scheduler. This is used to write groupings in order.
+   */
+  GQueue *groupings;
+  /** map grouping name to struct gw_grouping for fast lookup */
+  GHashTable *grouping_index;
+  /** Special case of requests without grouping that can't be stored in the hash
+   * table.
+   */
+  struct gw_grouping *no_grouping;
+
+  /** List of size n_media. Devices used for these requests */
+  struct lrs_dev **devices;
+};
+
+struct gw_state {
+    /** key = value = struct gw_queue.
+     *
+     * gw_queue is hashed based on the layout type, number of media per request and tag
+     * list. This information is contained in the struct gw_queue. There is no external
+     * key. Therefore, gw_queue is the key and the value.
+     */
+    GHashTable *queues;
+
+    /**
+     * List of queues in \p queues added in the order they are created
+     * to match the order in which they are sent to the LRS.
+     */
+    GList *ordered_queues;
+
+    /**
+     * List of queues allocated to devices.
+     */
+    GList *allocated;
+
+    /** Request currently being allocated (peek -> get_device_medium_pair ->
+     * remove/request cycle)
+     */
+    struct gw_request *current;
+
+    /** List of devices eligible for scheduling a new queue */
+    GPtrArray *free_devices;
+
+    /** Hash table to quickly find a queue given a device. */
+    GHashTable *device_to_queue;
+};
+
+static guint glib_wqueue_hash(gconstpointer v)
+{
+    const struct gw_queue *queue = v;
+
+    return g_str_hash(queue->tags) ^ g_int64_hash(&queue->n_media) ^
+        g_int_hash(&queue->layout_type);
+}
+
+static gboolean glib_wqueue_equal(gconstpointer _lhs, gconstpointer _rhs)
+{
+    const struct gw_queue *lhs = _lhs;
+    const struct gw_queue *rhs = _rhs;
+
+    return (lhs->layout_type == rhs->layout_type) &&
+        (lhs->n_media == rhs->n_media) &&
+        !strcmp(lhs->tags, rhs->tags);
+}
+
 static int gw_init(struct io_scheduler *io_sched)
 {
+    struct gw_state *state;
+    int rc;
+
+    state = xcalloc(1, sizeof(*state));
+    /* explicit initialization even though it is already NULL just to show
+     * that we have empty GLists
+     */
+    state->allocated = NULL;
+    state->ordered_queues = NULL;
+    state->queues = g_hash_table_new(glib_wqueue_hash, glib_wqueue_equal);
+    if (!state->queues)
+        GOTO(free_state, rc = -ENOMEM);
+
+    state->device_to_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (!state->device_to_queue)
+        GOTO(free_queues, rc = -ENOMEM);
+
+    state->free_devices = g_ptr_array_new();
+    if (!state->free_devices)
+        GOTO(free_device_to_queue, rc = -ENOMEM);
+
+    io_sched->private_data = state;
+
     return 0;
+
+free_device_to_queue:
+    g_hash_table_destroy(state->device_to_queue);
+free_queues:
+    g_hash_table_destroy(state->queues);
+free_state:
+    free(state);
+
+    return rc;
 }
 
 static void gw_fini(struct io_scheduler *io_sched)
 {
+    struct gw_state *state = io_sched->private_data;
+
+    g_ptr_array_free(state->free_devices, TRUE);
+    g_hash_table_destroy(state->device_to_queue);
+    g_hash_table_destroy(state->queues);
+    free(state);
 }
 
 static int gw_peek_request(struct io_scheduler *io_sched,
@@ -50,6 +186,8 @@ static int gw_peek_request(struct io_scheduler *io_sched,
 static int gw_push_request(struct io_scheduler *io_sched,
                            struct req_container *reqc)
 {
+    assert(pho_request_is_write(reqc->req));
+
     return 0;
 }
 

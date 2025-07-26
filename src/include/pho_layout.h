@@ -75,7 +75,7 @@ struct pho_layout_module_ops {
                               struct extent *extent,
                               struct pho_attrs *layout_md);
 
-    /** Updates the status of an copy based on its extents */
+    /** Updates the status of a copy based on its extents */
     int (*reconstruct)(struct layout_info lyt, struct copy_info *copy);
 };
 
