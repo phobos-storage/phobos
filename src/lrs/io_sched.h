@@ -398,7 +398,7 @@ int io_sched_retry(struct io_sched_handle *io_sched_hdl,
                    struct sub_request *sreq,
                    struct lrs_dev **dev);
 
-/* Remove a specific device from the I/O schedulers that own it
+/* Remove a specific device from the I/O schedulers that owns it
  *
  * \param[in]  io_sched_hdl a valid io_sched_handle
  * \param[in]  device       a device to remove

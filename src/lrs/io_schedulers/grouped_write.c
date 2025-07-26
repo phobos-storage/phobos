@@ -147,6 +147,13 @@ static struct gw_grouping *gw_grouping_new(const char *name)
     return grouping;
 }
 
+static void gw_grouping_free(struct gw_grouping *grouping)
+{
+    g_queue_free(grouping->requests);
+    free(grouping->name);
+    free(grouping);
+}
+
 static guint glib_wqueue_hash(gconstpointer v)
 {
     const struct gw_queue *queue = v;
@@ -326,6 +333,45 @@ static void gw_queue_push(struct gw_queue *queue, struct req_container *reqc)
     g_queue_push_tail(grouping->requests, req);
 }
 
+static void gw_request_fini(struct gw_request *req)
+{
+    free(req);
+}
+
+static void remove_grouping(struct gw_queue *queue,
+                            struct gw_grouping *grouping)
+{
+    struct gw_grouping *tmp;
+
+    tmp = g_queue_pop_head(queue->groupings);
+    assert(tmp == grouping);
+
+    if (grouping->name) {
+        g_hash_table_remove(queue->grouping_index,
+                            grouping->name);
+        gw_grouping_free(grouping);
+    } else {
+        gw_grouping_free(queue->no_grouping);
+        queue->no_grouping = NULL;
+    }
+}
+
+static struct gw_request *gw_queue_pop(struct gw_queue *queue)
+{
+    struct gw_grouping *grouping;
+    struct gw_request *req;
+
+    grouping = g_queue_peek_head(queue->groupings);
+    if (!grouping)
+        return NULL;
+
+    req = g_queue_pop_head(grouping->requests);
+    if (g_queue_is_empty(grouping->requests))
+        remove_grouping(queue, grouping);
+
+    return req;
+}
+
 static int gw_push_request(struct io_scheduler *io_sched,
                            struct req_container *reqc)
 {
@@ -343,9 +389,61 @@ static int gw_push_request(struct io_scheduler *io_sched,
     return 0;
 }
 
+static void gw_queue_destroy(struct gw_state *state, struct gw_queue *queue)
+{
+    size_t i;
+
+    for (i = 0; i < queue->n_media; i++) {
+        if (!queue->devices[i])
+            continue;
+
+        g_ptr_array_add(state->free_devices, queue->devices[i]);
+        g_hash_table_remove(state->device_to_queue, queue->devices[i]);
+    }
+
+    state->allocated = g_list_remove(state->allocated, queue);
+    g_hash_table_remove(state->queues, queue);
+    state->ordered_queues = g_list_remove(state->ordered_queues, queue);
+    free((void *)queue->tags);
+    free(queue->devices);
+    g_queue_free(queue->groupings);
+    g_hash_table_destroy(queue->grouping_index);
+}
+
+static bool gw_queue_empty(struct gw_queue *queue)
+{
+    struct gw_grouping *first = g_queue_peek_head(queue->groupings);
+
+    return !first || g_queue_is_empty(first->requests);
+}
+
 static int gw_remove_request(struct io_scheduler *io_sched,
                              struct req_container *reqc)
 {
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue;
+    struct gw_request *req;
+
+    if (!state->current)
+        /* if peek_request failed to allocate this request to devices */
+        queue = gw_find_queue(state, reqc);
+    else
+        queue = state->current->queue;
+
+    pho_debug("Request %p will be removed from grouped write scheduler", reqc);
+
+    req = gw_queue_pop(queue);
+    if (!req || (state->current && req != state->current))
+        LOG_RETURN(-EINVAL,
+                   "Expected request '%p' to be pop'ed from queue, found '%p'",
+                   state->current, req);
+
+    if (gw_queue_empty(req->queue))
+        gw_queue_destroy(state, req->queue);
+
+    gw_request_fini(req);
+    state->current = NULL;
+
     return 0;
 }
 
