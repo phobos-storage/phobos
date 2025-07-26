@@ -551,14 +551,57 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
                                      struct lrs_dev **dev,
                                      size_t *index)
 {
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue;
+    struct gw_request *req;
+    int rc;
+
+    assert(state->current && state->current->reqc == reqc);
+
+    req = state->current;
+    queue = req->queue;
+    if (queue->devices[*index]) {
+        /* TODO if request is not the first of the queue to be allocated,
+         * recheck writability of the tape. Move it at the begining of the
+         * allocated queue.
+         */
+        g_hash_table_remove(state->device_to_queue, queue->devices[*index]);
+        queue->devices[*index] = NULL;
+    }
+
+    rc = find_write_device(io_sched, req->reqc, &queue->devices[*index], *index,
+                           false);
+    if (rc)
+        return rc;
+
+    *dev = req->queue->devices[*index];
+
     return 0;
 }
 
+/* The request might have been the last. If so the queue was removed
+ * on .remove_request(). The other devices of the queue should still
+ * be allocated. Simply reallocate the one that failed.
+ */
 static int gw_retry(struct io_scheduler *io_sched,
                     struct sub_request *sreq,
                     struct lrs_dev **dev)
 {
-    return 0;
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue;
+    int rc;
+
+    /* retry is called after remove */
+    assert(!state->current);
+
+    rc = find_write_device(io_sched, sreq->reqc, dev,
+                           sreq->medium_index, true);
+
+    queue = gw_find_queue(state, sreq->reqc);
+    if (queue)
+        queue->devices[sreq->medium_index] = *dev;
+
+    return rc;
 }
 
 static void gw_add_device(struct io_scheduler *io_sched,
