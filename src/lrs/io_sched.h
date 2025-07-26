@@ -39,6 +39,12 @@
 #include "pho_srl_lrs.h"
 #include "lrs_device.h"
 
+/* Iterate over all the elements in the GList \p list. \p var is used as the
+ * name of the current element in the iteration.
+ */
+#define glist_foreach(var, list) \
+    for (GList *var = list; var; var = var->next)
+
 extern struct pho_config_item cfg_io_sched[];
 
 /** List of I/O scheduler configuration parameters */
