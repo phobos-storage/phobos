@@ -24,7 +24,6 @@
  */
 #include "lrs_sched.h"
 #include "lrs_utils.h"
-#include "pho_cfg.h"
 #include "pho_common.h"
 #include "pho_types.h"
 #include "schedulers.h"
@@ -729,10 +728,89 @@ static int gw_remove_device(struct io_scheduler *io_sched,
     return 0;
 }
 
+static int gw_exchange_device(struct io_scheduler *io_sched,
+                              union io_sched_claim_device_args *args)
+{
+    struct gw_state *state = io_sched->private_data;
+    struct lrs_dev *device_to_remove;
+    struct lrs_dev *device_to_add;
+    guint index;
+    bool found;
+
+    device_to_add = args->exchange.unused_device;
+    found = g_ptr_array_find(state->free_devices,
+                             args->exchange.desired_device,
+                             &index);
+    if (!dev_is_sched_ready(device_to_add) || !found)
+        /* Device used, do not give it back. Note that this will block the device
+         * until all the writes are done.
+         *
+         * XXX This is likely the read scheduler asking for this device.
+         * We have two options here:
+         * - block the read until the writes are finished which will incur less
+         *   tape movement but slow down reads which may block applications;
+         * - give priority to reads to increase object retrieval at the cost of
+         *   write performance.
+         *
+         * The best option is probably to add a parameter to control this as this
+         * is application dependant.
+         */
+        return 0;
+
+    device_to_remove = g_ptr_array_index(state->free_devices, index);
+    device_to_remove->ld_io_request_type &= ~io_sched->type;
+    device_to_add->ld_io_request_type = io_sched->type;
+    gw_add_device(io_sched, device_to_add);
+    g_ptr_array_remove(io_sched->devices, device_to_remove);
+
+    return 0;
+}
+
+static struct lrs_dev *gw_find_device_to_remove(struct io_scheduler *io_sched,
+                                                const char *techno)
+{
+    struct gw_state *state = io_sched->private_data;
+    size_t i;
+
+    for (i = 0; i < state->free_devices->len; i++) {
+        struct lrs_dev *device = g_ptr_array_index(state->free_devices, 0);
+
+        if (strcmp(techno, device->ld_technology))
+            continue;
+
+        return device;
+    }
+
+    return NULL;
+}
+
 static int gw_claim_device(struct io_scheduler *io_sched,
                            enum io_sched_claim_device_type type,
                            union io_sched_claim_device_args *args)
 {
+    switch (type) {
+    case IO_SCHED_BORROW:
+        return -ENOTSUP;
+    case IO_SCHED_EXCHANGE:
+        return gw_exchange_device(io_sched, args);
+    case IO_SCHED_TAKE:
+        /* give back device to dispatch algorithm (e.g. faire_share) even if in
+         * the middle of an I/O. If this goes to the read scheduler we will
+         * likely have to reload another tape later for the current I/O.
+         */
+        args->take.device =
+            gw_find_device_to_remove(io_sched, args->take.technology);
+
+        if (!args->take.device)
+            return -ENODEV;
+
+        gw_remove_device(io_sched, args->take.device);
+
+        return 0;
+    default:
+        return -EINVAL;
+    }
+
     return 0;
 }
 
