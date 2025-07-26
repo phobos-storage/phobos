@@ -53,6 +53,9 @@
  * different tags per medium. This is not currently the case in Phobos.
  */
 
+#define walloc_grouping(reqc) \
+    (reqc)->req->walloc->grouping
+
 struct gw_request {
     struct req_container *reqc;
     /** Pointer to the queue containing this request */
@@ -133,6 +136,17 @@ struct gw_state {
     GHashTable *device_to_queue;
 };
 
+static struct gw_grouping *gw_grouping_new(const char *name)
+{
+    struct gw_grouping *grouping;
+
+    grouping = xmalloc(sizeof(*grouping));
+    grouping->name = xstrdup_safe(name);
+    grouping->requests = g_queue_new();
+
+    return grouping;
+}
+
 static guint glib_wqueue_hash(gconstpointer v)
 {
     const struct gw_queue *queue = v;
@@ -198,16 +212,133 @@ static void gw_fini(struct io_scheduler *io_sched)
     free(state);
 }
 
-static int gw_peek_request(struct io_scheduler *io_sched,
-                           struct req_container **reqc)
+static char *tag2csv(pho_req_write_t *walloc)
 {
-    return 0;
+    char *tag_list;
+    size_t len = 0;
+    size_t n_tags;
+    char **tags;
+    char *iter;
+    size_t i;
+
+    assert(walloc->n_media > 0);
+
+    tags = walloc->media[0]->tags;
+    n_tags = walloc->media[0]->n_tags;
+
+    for (i = 0; i < n_tags; i++)
+        len += strlen(tags[i]) + 1; // + 1 for the ','
+
+    if (n_tags > 0)
+        len--; // remove last +1 for ','
+
+    tag_list = xmalloc(len + 1); // +1 for '\0'
+    iter = tag_list;
+
+    for (i = 0; i < n_tags; i++) {
+        size_t len = strlen(tags[i]);
+
+        memcpy(iter, tags[i], len);
+        iter += len;
+        *iter++ = ',';
+    }
+    if (n_tags > 0)
+        iter--; // move iter back to overwrite last ','
+    *iter = '\0';
+
+    pho_debug("build tag_list '%s' for '%p'", tag_list, walloc);
+
+    return tag_list;
+}
+
+static struct gw_queue *gw_find_queue(struct gw_state *state,
+                                      struct req_container *reqc)
+{
+    struct gw_queue tmp = {
+        .n_media = reqc->req->walloc->n_media,
+        .layout_type = 0,
+        .tags = tag2csv(reqc->req->walloc),
+    };
+    struct gw_queue *queue;
+
+    queue = g_hash_table_lookup(state->queues, &tmp);
+    free((void *)tmp.tags);
+
+    return queue;
+}
+
+static struct gw_queue *gw_queue_create(struct gw_state *state,
+                                        struct req_container *reqc)
+{
+    struct gw_queue *queue = xcalloc(1, sizeof(*queue));
+
+    queue->tags = tag2csv(reqc->req->walloc);
+    queue->n_media = reqc->req->walloc->n_media;
+    queue->devices = xcalloc(queue->n_media, sizeof(*queue->devices));
+    queue->groupings = g_queue_new();
+    queue->grouping_index = g_hash_table_new(g_str_hash, g_str_equal);
+    queue->layout_type = 0;
+
+    g_hash_table_insert(state->queues, queue, queue);
+    state->ordered_queues = g_list_append(state->ordered_queues, queue);
+
+    return queue;
+}
+
+static struct gw_grouping *get_grouping(struct gw_queue *queue,
+                                        const char *name)
+{
+    struct gw_grouping *grouping;
+
+    if (!name) {
+        if (queue->no_grouping)
+            return queue->no_grouping;
+
+        goto new_grouping;
+    }
+
+    grouping = g_hash_table_lookup(queue->grouping_index, name);
+    if (grouping)
+        return grouping;
+
+new_grouping:
+    grouping = gw_grouping_new(name);
+    g_queue_push_head(queue->groupings, grouping);
+    if (name)
+        g_hash_table_insert(queue->grouping_index, grouping->name, grouping);
+    else
+        queue->no_grouping = grouping;
+
+    return grouping;
+}
+
+static void gw_queue_push(struct gw_queue *queue, struct req_container *reqc)
+{
+    struct gw_request *req = xmalloc(sizeof(*req));
+    struct gw_grouping *grouping;
+
+    req->reqc = reqc;
+    req->queue = queue;
+
+    grouping = get_grouping(queue, walloc_grouping(reqc));
+    assert(grouping);
+
+    g_queue_push_tail(grouping->requests, req);
 }
 
 static int gw_push_request(struct io_scheduler *io_sched,
                            struct req_container *reqc)
 {
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue;
+
     assert(pho_request_is_write(reqc->req));
+
+    queue = gw_find_queue(state, reqc);
+    if (!queue)
+        queue = gw_queue_create(state, reqc);
+
+    gw_queue_push(queue, reqc);
 
     return 0;
 }
@@ -220,6 +351,12 @@ static int gw_remove_request(struct io_scheduler *io_sched,
 
 static int gw_requeue(struct io_scheduler *io_sched,
                       struct req_container *reqc)
+{
+    return 0;
+}
+
+static int gw_peek_request(struct io_scheduler *io_sched,
+                           struct req_container **reqc)
 {
     return 0;
 }
