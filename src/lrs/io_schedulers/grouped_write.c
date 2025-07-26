@@ -379,17 +379,48 @@ static int gw_retry(struct io_scheduler *io_sched,
 static void gw_add_device(struct io_scheduler *io_sched,
                           struct lrs_dev *new_device)
 {
+    struct gw_state *state = io_sched->private_data;
+    size_t i;
+
+    for (i = 0; i < io_sched->devices->len; i++) {
+        struct lrs_dev *dev;
+
+        dev = g_ptr_array_index(io_sched->devices, i);
+        if (new_device == dev)
+            return;
+    }
+
+    g_ptr_array_add(io_sched->devices, new_device);
+    g_ptr_array_add(state->free_devices, new_device);
 }
 
 static struct lrs_dev **gw_get_device(struct io_scheduler *io_sched,
                                       size_t i)
 {
-    return 0;
+    return (struct lrs_dev **)&io_sched->devices->pdata[i];
 }
 
 static int gw_remove_device(struct io_scheduler *io_sched,
                             struct lrs_dev *device)
 {
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue;
+
+    /* remove the device from its queue if allocated */
+    queue = g_hash_table_lookup(state->device_to_queue, device);
+    if (queue) {
+        size_t i;
+
+        g_hash_table_remove(state->device_to_queue, device);
+        for (i = 0; i < queue->n_media; i++) {
+            if (queue->devices[i] == device)
+                queue->devices[i] = NULL;
+        }
+    }
+
+    g_ptr_array_remove(io_sched->devices, device);
+    g_ptr_array_remove(state->free_devices, device);
+
     return 0;
 }
 
