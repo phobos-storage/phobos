@@ -128,12 +128,6 @@ struct grouped_data {
     struct queue_element *current_elem;
 };
 
-/* Iterate over all the element in the GList \p list. \p var is used as the
- * name of the current element in the iteration.
- */
-#define glist_foreach(var, list) \
-    for (GList *var = list; var; var = var->next)
-
 static ssize_t reqc_get_medium_index_from_medium_id(struct req_container *reqc,
                                                     struct pho_id *medium_id)
 {

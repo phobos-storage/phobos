@@ -372,6 +372,17 @@ static struct gw_request *gw_queue_pop(struct gw_queue *queue)
     return req;
 }
 
+static struct gw_request *gw_queue_peek(struct gw_queue *queue)
+{
+    struct gw_grouping *grouping;
+
+    grouping = g_queue_peek_head(queue->groupings);
+    if (!grouping)
+        return NULL;
+
+    return g_queue_peek_head(grouping->requests);
+}
+
 static int gw_push_request(struct io_scheduler *io_sched,
                            struct req_container *reqc)
 {
@@ -384,6 +395,7 @@ static int gw_push_request(struct io_scheduler *io_sched,
     if (!queue)
         queue = gw_queue_create(state, reqc);
 
+    assert(queue);
     gw_queue_push(queue, reqc);
 
     return 0;
@@ -453,10 +465,85 @@ static int gw_requeue(struct io_scheduler *io_sched,
     return 0;
 }
 
+static int gw_queue_next_request(struct gw_state *state,
+                                 struct gw_queue *queue,
+                                 struct req_container **reqc)
+{
+    struct gw_request *req = gw_queue_peek(queue);
+
+    /* On remove, the queue is deleted if empty. We should always have a
+     * request available during peek_request
+     */
+    assert(req);
+
+    *reqc = req->reqc;
+    state->current = req;
+
+    return 0;
+}
+
+static int gw_alloc_new_queue(struct gw_state *state)
+{
+    GList *first = g_list_first(state->ordered_queues);
+    struct gw_queue *queue;
+
+    if (!first)
+        /* no more new requests not already allocated to a device */
+        return -EAGAIN;
+
+    queue = first->data;
+    if (queue->n_media > state->free_devices->len)
+        /* Not enough devices, do not allocate. This scheduler relies on
+         * smart scheduling policies prior to reaching the LRS. It will not
+         * try to see if another queue in the list can fit right now.
+         */
+        return -EAGAIN;
+
+    state->allocated = g_list_append(state->allocated, queue);
+    state->ordered_queues = g_list_remove_link(state->ordered_queues, first);
+
+    return 0;
+}
+
+static bool queue_busy(struct gw_state *state,
+                       struct gw_queue *queue)
+{
+    size_t i;
+
+    for (i = 0; i < queue->n_media; i++) {
+        if (!queue->devices[i])
+            return false;
+
+        if (!dev_is_sched_ready(queue->devices[i]))
+            return true;
+    }
+
+    return false;
+}
+
 static int gw_peek_request(struct io_scheduler *io_sched,
                            struct req_container **reqc)
 {
-    return 0;
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue = NULL;
+
+    *reqc = NULL;
+
+    if (state->free_devices->len > 0)
+        gw_alloc_new_queue(state);
+
+    glist_foreach(iter, state->allocated) {
+        queue = iter->data;
+        if (!queue_busy(state, queue))
+            break;
+
+        queue = NULL;
+    }
+    if (!queue)
+        /* All devices are busy, try later. */
+        return 0;
+
+    return gw_queue_next_request(state, queue, reqc);
 }
 
 static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
