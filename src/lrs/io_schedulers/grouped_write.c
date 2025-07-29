@@ -102,6 +102,17 @@ struct gw_queue {
 
   /** List of size n_media. Devices used for these requests */
   struct lrs_dev **devices;
+
+  /**
+   * Index of the current medium to allocate in .get_device_medium_pair()
+   * Used to detect whether the caller is retrying to allocate a device
+   * that was not ready for use due to concurrency effects for instance.
+   *
+   * First initialized to n_media by .peek_request() since the index is an
+   * unsigned integer, we have to use a positive value to detect the first index
+   * of 0.
+   */
+  size_t alloc_index;
 };
 
 struct gw_state {
@@ -285,6 +296,7 @@ static struct gw_queue *gw_queue_create(struct gw_state *state,
     queue->groupings = g_queue_new();
     queue->grouping_index = g_hash_table_new(g_str_hash, g_str_equal);
     queue->layout_type = 0;
+    queue->alloc_index = queue->n_media;
 
     g_hash_table_insert(state->queues, queue, queue);
     state->ordered_queues = g_list_append(state->ordered_queues, queue);
@@ -444,6 +456,8 @@ static int gw_remove_request(struct io_scheduler *io_sched,
 
     pho_debug("Request %p will be removed from grouped write scheduler", reqc);
 
+    /* reset alloc index for next requests in the queue */
+    queue->alloc_index = queue->n_media;
     req = gw_queue_pop(queue);
     if (!req || (state->current && req != state->current))
         LOG_RETURN(-EINVAL,
@@ -459,9 +473,22 @@ static int gw_remove_request(struct io_scheduler *io_sched,
     return 0;
 }
 
+/* The request is still on the queue since we don't call .remove_request()
+ * in this case. We just need to reset alloc_index here.
+ */
 static int gw_requeue(struct io_scheduler *io_sched,
                       struct req_container *reqc)
 {
+    struct gw_state *state = io_sched->private_data;
+    struct gw_queue *queue;
+
+    queue = gw_find_queue(state, reqc);
+    /* Since the request was not removed from the queue, the queue should
+     * still exist.
+     */
+    assert(queue);
+
+    queue->alloc_index = queue->n_media;
     return 0;
 }
 
@@ -478,6 +505,7 @@ static int gw_queue_next_request(struct gw_state *state,
 
     *reqc = req->reqc;
     state->current = req;
+    queue->alloc_index = queue->n_media;
 
     return 0;
 }
@@ -546,6 +574,40 @@ static int gw_peek_request(struct io_scheduler *io_sched,
     return gw_queue_next_request(state, queue, reqc);
 }
 
+static struct string_array request_get_tags(struct gw_request *request)
+{
+    return (struct string_array) {
+        .strings = request->reqc->req->walloc->media[0]->tags,
+        .count = request->reqc->req->walloc->media[0]->n_tags,
+    };
+}
+
+static bool medium_is_ready(struct gw_state *state, struct gw_queue *queue,
+                            size_t index)
+{
+    struct gw_request *first;
+    struct media_info *medium;
+    struct string_array tags;
+    bool compatible;
+
+    assert(queue->devices[index]);
+
+    medium = atomic_dev_medium_get(queue->devices[index]);
+    if (!medium)
+        return false;
+
+    first = gw_queue_peek(queue);
+    /* An empty queue should not be still there on peek request */
+    assert(first);
+
+    tags = request_get_tags(first);
+
+    /* Ignore grouping here as this does not prevent the write */
+    compatible = medium_is_write_compatible(medium, NULL, &tags, false);
+    lrs_medium_release(medium);
+    return compatible;
+}
+
 static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
                                      struct req_container *reqc,
                                      struct lrs_dev **dev,
@@ -560,11 +622,26 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
 
     req = state->current;
     queue = req->queue;
-    if (queue->devices[*index]) {
-        /* TODO if request is not the first of the queue to be allocated,
-         * recheck writability of the tape. Move it at the begining of the
-         * allocated queue.
+
+    if ((queue->alloc_index == queue->n_media ||
+        *index > queue->alloc_index) &&
+        queue->devices[*index]) {
+        /* Queue was allocated to a device for a previous request. Recheck
+         * compatibility in case the state of the device or medium has changed.
+         * No need to check the device status (e.g. failed), the upper layer will
+         * do it for us.
          */
+        if (medium_is_ready(state, queue, *index)) {
+            queue->alloc_index = *index;
+            /* reuse the same device */
+            *dev = queue->devices[*index];
+            return 0;
+        }
+    }
+
+    queue->alloc_index = *index;
+    if (queue->devices[*index]) {
+        /* The upper layer wants a different device, remove the previous one. */
         g_hash_table_remove(state->device_to_queue, queue->devices[*index]);
         queue->devices[*index] = NULL;
     }
@@ -574,7 +651,7 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
     if (rc)
         return rc;
 
-    *dev = req->queue->devices[*index];
+    *dev = queue->devices[*index];
 
     return 0;
 }
