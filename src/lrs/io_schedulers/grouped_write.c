@@ -30,6 +30,27 @@
 #include "schedulers.h"
 
 /* Principle of the algorithm:
+ *
+ * The goal is to group write requests per tag and RAID parameters (e.g.
+ * n_media). The assumption is that upper layers will be smart enough to push
+ * writes to the LRS so that by performing them in order the devices will be
+ * used most of the time. For instance, one device won't stay idle waiting for
+ * a second device to be available for a RAID1/repl_count=2 write.
+ *
+ * We also group writes per grouping on the tapes. This will increase data
+ * locality to reduce the read latency. Less tape seeks will be necessary to
+ * read all the data of a given grouping.
+ *
+ * To achieve this, requests are put in queues (struct gw_queue) that are stored
+ * in an hashtable. They are indexed by layout parameters and tags. Each
+ * gw_queue contains a list of queues. One queue per grouping. When new requests
+ * are pushed, the appropriate queue is retrieved from the hash table using
+ * the request's parameters. The request is then inserted in the appropriate
+ * grouping's queue.
+ *
+ * One assumption made by this algorithm is that all the media of a given
+ * write request all use the same tags. The protocol seems to support
+ * different tags per medium. This is not currently the case in Phobos.
  */
 
 struct gw_request {
