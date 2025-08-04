@@ -229,42 +229,58 @@ static void gw_fini(struct io_scheduler *io_sched)
     free(state);
 }
 
+static gint glib_strcmp(gconstpointer a, gconstpointer b)
+{
+    return strcmp((const char *)a, (const char *)b);
+}
+
+static GList *sorted_tags(char **tags, size_t n_tags)
+{
+    GList *res = NULL;
+    size_t i;
+
+    for (i = 0; i < n_tags; i++)
+        res = g_list_append(res, tags[i]);
+
+    return g_list_sort(res, glib_strcmp);
+}
+
 static char *tag2csv(pho_req_write_t *walloc)
 {
+    GList *tags = NULL;
     char *tag_list;
     size_t len = 0;
-    size_t n_tags;
-    char **tags;
     char *iter;
-    size_t i;
 
     assert(walloc->n_media > 0);
 
-    tags = walloc->media[0]->tags;
-    n_tags = walloc->media[0]->n_tags;
+    /* sort tags so that tags "foo,bar" and "bar,foo" are the same */
+    tags = sorted_tags(walloc->media[0]->tags,
+                       walloc->media[0]->n_tags);
 
-    for (i = 0; i < n_tags; i++)
-        len += strlen(tags[i]) + 1; // + 1 for the ','
+    glist_foreach(tag, tags)
+        len += strlen(tag->data) + 1; // + 1 for the ','
 
-    if (n_tags > 0)
+    if (g_list_length(tags) > 0)
         len--; // remove last +1 for ','
 
     tag_list = xmalloc(len + 1); // +1 for '\0'
     iter = tag_list;
 
-    for (i = 0; i < n_tags; i++) {
-        size_t len = strlen(tags[i]);
+    glist_foreach(tag, tags) {
+        size_t len = strlen(tag->data);
 
-        memcpy(iter, tags[i], len);
+        memcpy(iter, tag->data, len);
         iter += len;
         *iter++ = ',';
     }
-    if (n_tags > 0)
+    if (g_list_length(tags) > 0)
         iter--; // move iter back to overwrite last ','
     *iter = '\0';
 
     pho_debug("build tag_list '%s' for '%p'", tag_list, walloc);
 
+    g_list_free(tags);
     return tag_list;
 }
 
