@@ -185,7 +185,6 @@ static gboolean glib_wqueue_equal(gconstpointer _lhs, gconstpointer _rhs)
 static int gw_init(struct io_scheduler *io_sched)
 {
     struct gw_state *state;
-    int rc;
 
     state = xcalloc(1, sizeof(*state));
     /* explicit initialization even though it is already NULL just to show
@@ -194,29 +193,13 @@ static int gw_init(struct io_scheduler *io_sched)
     state->allocated = NULL;
     state->ordered_queues = NULL;
     state->queues = g_hash_table_new(glib_wqueue_hash, glib_wqueue_equal);
-    if (!state->queues)
-        GOTO(free_state, rc = -ENOMEM);
 
     state->device_to_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
-    if (!state->device_to_queue)
-        GOTO(free_queues, rc = -ENOMEM);
-
     state->free_devices = g_ptr_array_new();
-    if (!state->free_devices)
-        GOTO(free_device_to_queue, rc = -ENOMEM);
 
     io_sched->private_data = state;
 
     return 0;
-
-free_device_to_queue:
-    g_hash_table_destroy(state->device_to_queue);
-free_queues:
-    g_hash_table_destroy(state->queues);
-free_state:
-    free(state);
-
-    return rc;
 }
 
 static void gw_fini(struct io_scheduler *io_sched)
@@ -471,7 +454,7 @@ static int gw_remove_request(struct io_scheduler *io_sched,
 
     pho_debug("Request %p will be removed from grouped write scheduler", reqc);
 
-    /* reset alloc index for next requests in the queue */
+    /* reset alloc index for the next requests in the queue */
     queue->alloc_index = queue->n_media;
     req = gw_queue_pop(queue);
     if (!req || (state->current && req != state->current))
