@@ -1299,6 +1299,20 @@ static bool medium_is_write_compatible(struct media_info *medium,
     return true;
 }
 
+static bool medium_is_reserved_for_locate(struct media_info *medium,
+                                          int lock_expirancy)
+{
+    bool timestamp_is_past = false;
+    struct timespec expire;
+
+    expire.tv_sec = medium->lock.last_locate.tv_sec + lock_expirancy / 1000;
+    expire.tv_nsec = (lock_expirancy % 1000) * 1000000;
+    if (is_past(expire))
+        timestamp_is_past = true;
+
+    return timestamp_is_past;
+}
+
 /**
  * Device selection policy prototype.
  * @param[in]     required_size required space to perform the write operation.
@@ -1345,6 +1359,7 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
 {
     struct lrs_dev *selected = NULL;
     int selected_i = -1;
+    int lock_expirancy;
     int rc;
     int i;
 
@@ -1352,6 +1367,9 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
 
     if (one_drive_available)
         *one_drive_available = false;
+
+    lock_expirancy = PHO_CFG_GET_INT(cfg_lrs, PHO_CFG_LRS,
+                                     locate_lock_expirancy, 0);
 
     for (i = 0; i < devices->len; i++) {
         struct lrs_dev *itr = g_ptr_array_index(devices, i);
@@ -1362,6 +1380,16 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
             itr->ld_ongoing_scheduled) {
             pho_debug("Skipping busy device '%s'", itr->ld_dev_path);
             goto unlock_continue;
+        }
+
+        if (lock_expirancy != 0) {
+            lrs_medium_update(&itr->ld_dss_media_info->rsc.id);
+            if (medium_is_reserved_for_locate(itr->ld_dss_media_info,
+                                              lock_expirancy)) {
+                pho_debug("Skipping device '%s' with reserved medium",
+                          itr->ld_dev_path);
+                goto unlock_continue;
+            }
         }
 
         if (dev_is_failed(itr)) {
