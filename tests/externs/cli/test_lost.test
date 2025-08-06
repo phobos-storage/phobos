@@ -1,0 +1,115 @@
+#!/bin/bash
+
+#
+#  All rights reserved (c) 2014-2025 CEA/DAM.
+#
+#  This file is part of Phobos.
+#
+#  Phobos is free software: you can redistribute it and/or modify it under
+#  the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation, either version 2.1 of the Licence, or
+#  (at your option) any later version.
+#
+#  Phobos is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU Lesser General Public License for more details.
+#
+#  You should have received a copy of the GNU Lesser General Public License
+#  along with Phobos. If not, see <http://www.gnu.org/licenses/>.
+#
+
+#
+# Integration test for deletion of media and associated extents
+#
+
+test_dir=$(dirname $(readlink -e $0))
+. $test_dir/test_env.sh
+. $test_dir/setup_db.sh
+. $test_dir/tape_drive.sh
+. $test_dir/test_launch_daemon.sh
+. $test_dir/utils_generation.sh
+
+function setup_dir
+{
+    setup_tables
+    invoke_lrs
+
+    setup_test_dirs
+}
+
+function cleanup_dir
+{
+    waive_lrs
+
+    cleanup_test_dirs
+
+    drop_tables
+}
+
+function check_remaining
+{
+    local expected_count=$1
+    local expected_complete=$2
+    local expected_readable=$3
+    local expected_incomplete=$4
+
+    local dir_count="$($phobos dir list | wc -l)"
+    ((dir_count == $expected_count)) ||
+        error "$expected_count directories should remain"
+
+    # We need the space before the complete because "*complete*" matches
+    # with "incomplete"...
+    local copy_count="$($phobos copy list -o all | grep " complete" | wc -l)"
+    ((copy_count == $expected_complete)) ||
+        error "$expected_complete copies should remain complete"
+
+    copy_count="$($phobos copy list -o all | grep readable | wc -l)"
+    ((copy_count == $expected_readable)) ||
+        error "$expected_readable copies should be readable"
+
+    copy_count="$($phobos copy list -o all | grep incomplete | wc -l)"
+    ((copy_count == $expected_incomplete)) ||
+        error "$expected_incomplete copies should be incomplete"
+
+    local extent_count="$($phobos extent list | wc -l)"
+    ((extent_count == $expected_count)) ||
+        error "$expected_count extents should remain"
+
+}
+
+function test_simple
+{
+    local dirs=("$DIR_TEST_IN/tmp1" "$DIR_TEST_IN/tmp2" "$DIR_TEST_IN/tmp3")
+    local prefix=$(generate_prefix_id)
+    local oid=${prefix}_id
+
+    mkdir ${dirs[@]}
+    $phobos dir add --tags "first" ${dirs[0]}
+    $phobos dir add --tags "second" ${dirs[1]}
+    $phobos dir add --tags "third" ${dirs[2]}
+    $phobos dir format --fs posix --unlock ${dirs[@]}
+
+    $phobos put --family dir --tags "first" /etc/hosts $oid.0 ||
+        error "Object $oid.0 should be put"
+    $phobos put --family dir --tags "second" /etc/hosts $oid.1 ||
+        error "Object $oid.1 should be put"
+    $phobos put --family dir --tags "third" /etc/hosts $oid.2 ||
+        error "Object $oid.2 should be put"
+
+    waive_lrs
+
+    $phobos dir delete --lost ${dirs[0]} ||
+        error "Deletion of ${dirs[0]} should have succeeded"
+
+    check_remaining 2 2 0 1
+
+    $phobos dir delete --lost ${dirs[1]} ${dirs[2]} ||
+        error "Deletion of ${dirs[1]} and ${dirs[2]} should have succeeded"
+
+    check_remaining 0 0 0 3
+}
+
+TESTS=(
+    "setup_dir; test_simple; cleanup_dir"
+)
