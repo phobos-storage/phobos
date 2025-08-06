@@ -84,50 +84,81 @@ int delete_media_and_extents(struct admin_handle *handle,
                              struct media_info *media_list,
                              int media_count)
 {
-    int rc;
+    int rc = 0;
+    int rc2;
     int i;
     int j;
 
     for (i = 0; i < media_count; i++) {
         struct media_info *medium = &media_list[i];
-        struct extent *extents;
-        int extent_count;
+        struct extent *extents = NULL;
+        int extent_count = 0;
 
-        rc = get_extents_from_medium(&handle->dss, &medium->rsc.id, &extents,
-                                     &extent_count);
-        if (rc)
-            return rc;
+        rc2 = get_extents_from_medium(&handle->dss, &medium->rsc.id, &extents,
+                                      &extent_count);
+        if (rc2) {
+            pho_error(rc2, "Failed to get extents of medium '%s'",
+                      medium->rsc.id.name);
+            goto set_rc_and_continue;
+        }
 
         for (j = 0; j < extent_count; j++) {
             struct layout_info *layout;
             struct copy_info copy;
 
-            rc = get_layout_from_extent(&handle->dss, &extents[j], &layout);
-            if (rc)
-                return rc;
+            rc2 = get_layout_from_extent(&handle->dss, &extents[j], &layout);
+            if (rc2) {
+                pho_error(rc2,
+                          "Failed to get layout associated with extent '%s'",
+                          extents[j].uuid);
+                goto free_layout;
+            }
 
             copy.object_uuid = layout->uuid;
             copy.version = layout->version;
             copy.copy_name = layout->copy_name;
 
-            rc = dss_layout_delete(&handle->dss, layout, 1);
-            if (rc)
-                return rc;
+            rc2 = dss_layout_delete(&handle->dss, layout, 1);
+            if (rc2) {
+                pho_error(rc2,
+                          "Failed to delete layout associated with copy '%s' of object '%s', version '%d'",
+                          layout->copy_name, layout->oid, layout->version);
+                goto free_layout;
+            }
 
-            rc = reconstruct_copy(handle, &copy);
-            if (rc)
-                return rc;
+            rc2 = reconstruct_copy(handle, &copy);
+            if (rc2)
+                pho_error(rc2,
+                          "Failed to update copy '%s' of object '%s'",
+                          layout->copy_name, layout->oid);
 
+free_layout:
             dss_res_free(layout, 1);
+            if (rc2)
+                goto set_rc_and_continue;
         }
 
-        rc = dss_extent_delete(&handle->dss, extents, extent_count);
-        dss_res_free(extents, extent_count);
-        if (rc)
-            return rc;
-    }
+        rc2 = dss_extent_delete(&handle->dss, extents, extent_count);
+        if (rc2)
+            pho_error(rc2,
+                      "Failed to delete extents of medium '%s'",
+                      medium->rsc.id.name);
 
-    rc = dss_media_delete(&handle->dss, media_list, media_count);
+set_rc_and_continue:
+        dss_res_free(extents, extent_count);
+        rc = (rc ? : rc2);
+        if (rc2) {
+            pho_error(rc2, "Cannot delete medium '%s', skipping it",
+                      medium->rsc.id.name);
+            continue;
+        }
+
+        rc2 = dss_media_delete(&handle->dss, medium, 1);
+        if (rc2) {
+            pho_error(rc2, "Failed to delete medium '%s'", medium->rsc.id.name);
+            rc = (rc ? : rc2);
+        }
+    }
 
     return rc;
 }
