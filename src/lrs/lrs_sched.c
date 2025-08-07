@@ -1299,18 +1299,15 @@ static bool medium_is_write_compatible(struct media_info *medium,
     return true;
 }
 
-static bool medium_is_reserved_for_locate(struct media_info *medium,
+static bool check_locate_expirancy(struct media_info *medium,
                                           int lock_expirancy)
 {
-    bool timestamp_is_past = false;
     struct timespec expire;
 
     expire.tv_sec = medium->lock.last_locate.tv_sec + lock_expirancy / 1000;
     expire.tv_nsec = (lock_expirancy % 1000) * 1000000;
-    if (is_past(expire))
-        timestamp_is_past = true;
-
-    return timestamp_is_past;
+    
+    return is_past(expire);
 }
 
 /**
@@ -1384,8 +1381,8 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
 
         if (lock_expirancy != 0) {
             lrs_medium_update(&itr->ld_dss_media_info->rsc.id);
-            if (medium_is_reserved_for_locate(itr->ld_dss_media_info,
-                                              lock_expirancy)) {
+            if (check_locate_expirancy(itr->ld_dss_media_info,
+                                       lock_expirancy)) {
                 pho_debug("Skipping device '%s' with reserved medium",
                           itr->ld_dev_path);
                 goto unlock_continue;

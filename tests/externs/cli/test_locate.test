@@ -28,6 +28,7 @@ test_dir=$(dirname $(readlink -e $0))
 . $test_dir/setup_db.sh
 . $test_dir/test_launch_daemon.sh
 . $test_dir/tape_drive.sh
+. $test_dir/utils_generation.sh
 . test_locate_common.sh
 
 HALF_SIZE=1024
@@ -167,7 +168,7 @@ function test_locate_update_timestamp_without_lock
     $phobos tape add --type lto5 $tape
     $phobos tape format --unlock $tape
 
-    local oid="oid_locate_timestamp_without_lock"
+    local oid=$(generate_prefix_id)
     $phobos put /etc/hosts $oid ||
         error "Error while putting $oid"
 
@@ -182,7 +183,7 @@ function test_locate_update_timestamp_without_lock
     db_time=$($PSQL -t -c "SELECT last_locate FROM lock WHERE id = '${tape}_legacy';")
     db_time=$(date -d "$db_time" +%s)
 
-    if [ $checkpoint1 -g $db_time ] || [ $checkpoint2 -lt $db_time ]; then
+    if [ $checkpoint1 -ge $db_time ] || [ $checkpoint2 -le $db_time ]; then
         error "Invalid locate timestamp"
     fi
 
@@ -198,8 +199,6 @@ function test_locate_update_timestamp_without_lock
 
 function test_last_locate_timestamp
 {
-    sed -i "s/locate_lock_expirancy = 0/locate_lock_expirancy = 5000/g" $PHOBOS_CFG_FILE
-
     local drive=$(get_lto_drives 5 1)
     $phobos drive add --unlock $drive
 
@@ -207,15 +206,24 @@ function test_last_locate_timestamp
     $phobos tape add --type lto5 "$tapes"
     $phobos tape format --unlock "${tapes[0]}"
 
-    local oid="oid_locate_timestamp"
+    local oid=$(generate_prefix_id)
     $phobos put /etc/hosts $oid ||
         error "Error while putting $oid"
+
+    waive_lrs
+
+    export PHOBOS_LRS_locate_lock_expirancy=5000
+
+    invoke_lrs
 
     $phobos locate $oid
     $phobos tape format "${tapes[1]}" &&
         error "Format should have failed, as no drives are available"
 
-    sed -i "s/locate_lock_expirancy = 5000/locate_lock_expirancy = 0/g" $PHOBOS_CFG_FILE
+    date -s @"$(($(date +%s) + 60))"
+
+    $phobos tape format "${tapes[1]}" ||
+        error "Format should have succeeded"
 }
 
 function test_locate_compatibility
