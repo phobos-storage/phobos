@@ -120,7 +120,6 @@ CREATE TABLE lock(
     hostname        varchar(256) NOT NULL,
     owner           integer NOT NULL,
     timestamp       timestamp DEFAULT now(),
-    is_early        boolean DEFAULT FALSE,
     last_locate     timestamp DEFAULT NULL,
 
     PRIMARY KEY (type, id)

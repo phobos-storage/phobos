@@ -94,7 +94,6 @@ class DSSLock(Structure): # pylint: disable=too-few-public-methods
         ('lock_owner', c_int),
         ('lock_ts', Timeval),
         ('last_locate', Timeval),
-        ('lock_is_early', c_bool),
     ]
 
     @property

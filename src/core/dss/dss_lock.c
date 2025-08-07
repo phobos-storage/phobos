@@ -77,7 +77,12 @@ enum lock_query_idx {
                       "              WHERE type = lock_type AND "       \
                       "                    id = lock_id);"              \
                       "         lock_is_early BOOLEAN:="                \
-                      "             (SELECT is_early FROM lock"         \
+                      "             (SELECT CASE"                       \
+                      "                WHEN last_locate IS NULL"        \
+                      "                  THEN FALSE"                    \
+                      "                  ELSE TRUE"                     \
+                      "                END AS is_early"                 \
+                      "              FROM lock"                         \
                       "              WHERE type = lock_type AND "       \
                       "                    id = lock_id);"
 
@@ -100,10 +105,8 @@ enum lock_query_idx {
 
 static const char * const lock_query[] = {
     [DSS_LOCK_QUERY]         = "INSERT INTO lock"
-                               " (type, id, owner, hostname, last_locate, "
-                               "  is_early)"
-                               " VALUES ('%s'::lock_type, '%s', %d, '%s', %s, "
-                               "         %s);",
+                               " (type, id, owner, hostname, last_locate) "
+                               " VALUES ('%s'::lock_type, '%s', %d, '%s', %s);",
     [DSS_REFRESH_QUERY]      = "DO $$"
                                  DECLARE_BLOCK
                                " BEGIN"
@@ -129,7 +132,7 @@ static const char * const lock_query[] = {
                                "  DELETE FROM lock"
                                "   WHERE type = lock_type AND id = lock_id;"
                                "END $$;",
-    [DSS_STATUS_QUERY]       = "SELECT hostname, owner, timestamp, last_locate, is_early"
+    [DSS_STATUS_QUERY]       = "SELECT hostname, owner, timestamp, last_locate"
                                "  FROM lock "
                                "  WHERE type = '%s'::lock_type AND id = '%s';",
     [DSS_CLEAN_DEVICE_QUERY] = "WITH id_host AS (SELECT id || '_' || library "
@@ -268,8 +271,7 @@ static int basic_lock(struct dss_handle *handle, enum dss_type lock_type,
 
     g_string_printf(request, lock_query[DSS_LOCK_QUERY],
                     dss_type_names[lock_type], lock_id, lock_owner,
-                    lock_hostname, is_early ? "now()" : "NULL",
-                    is_early ? "TRUE" : "FALSE");
+                    lock_hostname, is_early ? "now()" : "NULL");
 
     rc = execute(conn, request->str, &res, PGRES_COMMAND_OK);
 
@@ -363,8 +365,7 @@ static int basic_status(struct dss_handle *handle, enum dss_type lock_type,
         init_pho_lock(lock, PQgetvalue(res, 0, 0),
                       (int) strtoll(PQgetvalue(res, 0, 1), NULL, 10),
                       &lock_timestamp,
-                      &last_locate_timestamp,
-                      psqlstrbool2bool(*PQgetvalue(res, 0, 4)));
+                      &last_locate_timestamp);
     }
 
 out_cleanup:

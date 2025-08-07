@@ -268,7 +268,6 @@ struct pho_lock {
     int            owner;
     struct timeval timestamp;
     struct timeval last_locate;
-    bool           is_early;
 };
 
 /**

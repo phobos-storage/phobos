@@ -733,6 +733,7 @@ class Migrator: # pylint: disable=too-many-public-methods
         cur.execute(f"""
             -- update lock table
             ALTER TABLE lock ADD last_locate timestamp DEFAULT NULL;
+            ALTER TABLE lock DROP COLUMN is_early;
                     
             -- update current schema version
             UPDATE schema_info SET version = '3.2';
