@@ -315,23 +315,9 @@ static int raid1_encoder_get_repl_count(struct pho_data_processor *enc,
         /* set write size */
         if (*repl_count <= 0)
             LOG_RETURN(-EINVAL, "Invalid # of replica (%d)", *repl_count);
-
-
     }
 
     return 0;
-}
-
-static void raid1_encoder_set_object_size(struct pho_data_processor *enc)
-{
-    for (int i = 0; i < enc->xfer->xd_ntargets; i++) {
-        char size_string[16];
-
-        sprintf(size_string, "%ld", enc->xfer->xd_targets[i].xt_size);
-
-        pho_attr_set(&enc->dest_layout[i].layout_desc.mod_attrs,
-                     PHO_EA_OBJECT_SIZE_NAME, size_string);
-    }
 }
 
 /**
@@ -353,8 +339,6 @@ static int layout_raid1_encode(struct pho_data_processor *encoder)
     rc = raid1_encoder_get_repl_count(encoder, &repl_count);
     if (rc)
         return rc;
-
-    raid1_encoder_set_object_size(encoder);
 
     io_contexts = xcalloc(encoder->xfer->xd_ntargets, sizeof(*io_contexts));
     encoder->private_writer = io_contexts;

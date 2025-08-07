@@ -135,9 +135,16 @@ static int build_layout_writer(struct pho_data_processor *encoder,
         encoder->object_size = xfer->xd_targets[0].xt_size;
 
     for (i = 0; i < encoder->xfer->xd_ntargets; i++) {
+        char size_string[16];
+
         encoder->dest_layout[i].oid = xfer->xd_targets[i].xt_objid;
         encoder->dest_layout[i].wr_size = xfer->xd_targets[i].xt_size;
         encoder->dest_layout[i].copy_name = xstrdup(copy_name);
+
+        sprintf(size_string, "%ld", encoder->xfer->xd_targets[i].xt_size);
+
+        pho_attr_set(&encoder->dest_layout[i].layout_desc.mod_attrs,
+                     PHO_EA_OBJECT_SIZE_NAME, size_string);
     }
 
     return mod->ops->encode(encoder);
