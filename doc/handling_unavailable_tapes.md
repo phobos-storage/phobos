@@ -174,8 +174,6 @@ easier:
  - the `extent delete` command to delete an extent from the database and update
 the copy and object linked to it, while also showing if the copy and object are
 still readable or not (it is planned for version 3.2)
- - the `extent delete --orphan` command to automatically delete extents flagged
-as `orphan` in the database (it is planned for version 3.2)
  - the garbage collector to automatically handle `orphan` extents and delete
 them from the database.
  - the `tape delete --lost` command to delete a tape from the database and
