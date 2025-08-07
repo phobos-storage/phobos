@@ -45,6 +45,10 @@ static int get_layout_from_extent(struct dss_handle *dss,
     rc = dss_layout_get(dss, &filter, layout, &layout_count);
     dss_filter_free(&filter);
 
+    /* /!\ This works if there is no deduplication on the target extent. If the
+     * same extent is used by multiple layouts (because of deduplication), this
+     * assert will fail.
+     */
     assert(layout_count == 1);
 
     return rc;
