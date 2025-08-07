@@ -73,7 +73,7 @@ function check_remaining
     ((copy_count == $expected_incomplete)) ||
         error "$expected_incomplete copies should be incomplete"
 
-    local extent_count="$($phobos extent list | wc -l)"
+    local extent_count="$($phobos extent list --degroup | wc -l)"
     ((extent_count == $expected_extent_count)) ||
         error "$expected_extent_count extents should remain"
 
@@ -142,6 +142,8 @@ function test_layout_raid1
 
 function test_layout_raid4
 {
+    local file="$1"
+
     local dirs=("$DIR_TEST_IN/tmp1" "$DIR_TEST_IN/tmp2" "$DIR_TEST_IN/tmp3")
     local prefix=$(generate_prefix_id)
     local oid=${prefix}_id
@@ -150,7 +152,7 @@ function test_layout_raid4
     $phobos dir add ${dirs[@]}
     $phobos dir format --fs posix --unlock ${dirs[@]}
 
-    $phobos put --family dir --layout raid4 /etc/hosts $oid ||
+    $phobos put --family dir --layout raid4 $file $oid ||
         error "Object $oid should be put"
 
     waive_lrs
@@ -171,8 +173,29 @@ function test_layout_raid4
     check_remaining 0 0 0 1 0
 }
 
+function test_layout_raid4_even
+{
+    local file="$DIR_TEST_IN/test_raid4_even"
+
+    touch $file
+    dd if=/dev/zero of=$file count=1 bs=1024
+
+    test_layout_raid4 $file
+}
+
+function test_layout_raid4_odd
+{
+    local file="$DIR_TEST_IN/test_raid4_odd"
+
+    touch $file
+    dd if=/dev/zero of=$file count=1 bs=1025
+
+    test_layout_raid4 $file
+}
+
 TESTS=(
     "setup_dir; test_simple; cleanup_dir"
     "setup_dir; test_layout_raid1; cleanup_dir"
-    #"setup_dir; test_layout_raid4; cleanup_dir"
+    "setup_dir; test_layout_raid4_even; cleanup_dir"
+    "setup_dir; test_layout_raid4_odd; cleanup_dir"
 )
