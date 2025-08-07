@@ -67,8 +67,8 @@ int delete_media_and_extents(struct admin_handle *handle,
         rc2 = get_extents_from_medium(handle, &medium->rsc.id, &extents,
                                       &extent_count, false);
         if (rc2) {
-            pho_error(rc2, "Failed to get extents of medium '%s'",
-                      medium->rsc.id.name);
+            pho_error(rc2, "Failed to get extents of medium "FMT_PHO_ID,
+                      PHO_ID(medium->rsc.id));
             goto set_rc_and_continue;
         }
 
@@ -111,21 +111,22 @@ free_layout:
         rc2 = dss_extent_delete(&handle->dss, extents, extent_count);
         if (rc2)
             pho_error(rc2,
-                      "Failed to delete extents of medium '%s'",
-                      medium->rsc.id.name);
+                      "Failed to delete extents of medium "FMT_PHO_ID,
+                      PHO_ID(medium->rsc.id));
 
 set_rc_and_continue:
         dss_res_free(extents, extent_count);
         rc = (rc ? : rc2);
         if (rc2) {
-            pho_error(rc2, "Cannot delete medium '%s', skipping it",
-                      medium->rsc.id.name);
+            pho_error(rc2, "Cannot delete medium '"FMT_PHO_ID"', skipping it",
+                      PHO_ID(medium->rsc.id));
             continue;
         }
 
         rc2 = dss_media_delete(&handle->dss, medium, 1);
         if (rc2) {
-            pho_error(rc2, "Failed to delete medium '%s'", medium->rsc.id.name);
+            pho_error(rc2, "Failed to delete medium "FMT_PHO_ID,
+                      PHO_ID(medium->rsc.id));
             rc = (rc ? : rc2);
         }
     }
