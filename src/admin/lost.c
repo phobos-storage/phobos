@@ -27,37 +27,7 @@
 
 #include "import.h"
 #include "lost.h"
-
-static int get_extents_from_medium(struct dss_handle *dss,
-                                   struct pho_id *medium_id,
-                                   struct extent **extents,
-                                   int *extent_count)
-{
-    struct dss_filter filter;
-    int rc;
-
-    rc = dss_filter_build(&filter,
-                          "{\"$AND\": ["
-                          "  {\"DSS::EXT::medium_family\": \"%s\"},"
-                          "  {\"DSS::EXT::medium_id\": \"%s\"},"
-                          "  {\"DSS::EXT::medium_library\": \"%s\"}"
-                          "]}",
-                          rsc_family2str(medium_id->family),
-                          medium_id->name,
-                          medium_id->library);
-    if (rc)
-        LOG_RETURN(rc, "Failed to build filter for extent retrieval");
-
-    rc = dss_extent_get(dss, &filter, extents, extent_count);
-    dss_filter_free(&filter);
-    if (rc)
-        pho_error(rc,
-                  "Failed to retrieve (family '%s', name '%s', library '%s') extents",
-                  rsc_family2str(medium_id->family), medium_id->name,
-                  medium_id->library);
-
-    return rc;
-}
+#include "utils.h"
 
 static int get_layout_from_extent(struct dss_handle *dss,
                                   struct extent *extent,
@@ -94,8 +64,8 @@ int delete_media_and_extents(struct admin_handle *handle,
         struct extent *extents = NULL;
         int extent_count = 0;
 
-        rc2 = get_extents_from_medium(&handle->dss, &medium->rsc.id, &extents,
-                                      &extent_count);
+        rc2 = get_extents_from_medium(handle, &medium->rsc.id, &extents,
+                                      &extent_count, false);
         if (rc2) {
             pho_error(rc2, "Failed to get extents of medium '%s'",
                       medium->rsc.id.name);

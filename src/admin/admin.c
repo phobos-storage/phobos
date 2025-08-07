@@ -49,6 +49,7 @@
 
 #include "import.h"
 #include "lost.h"
+#include "utils.h"
 
 enum pho_cfg_params_admin {
     /* Actual admin parameters */
@@ -1204,46 +1205,6 @@ int phobos_admin_format(struct admin_handle *adm, const struct pho_id *ids,
     return rc;
 }
 
-static int _get_extents(struct admin_handle *adm,
-                        const struct pho_id *source,
-                        struct extent **extents, int *count, bool repack)
-{
-    struct dss_filter filter;
-    int rc;
-
-    if (repack)
-        rc = dss_filter_build(&filter,
-                              "{\"$AND\": ["
-                              "  {\"DSS::EXT::medium_family\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_id\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_library\": \"%s\"},"
-                              "  {\"$NOR\": [{\"DSS::EXT::state\": \"%s\"}]}"
-                              "]}", rsc_family2str(source->family),
-                              source->name, source->library,
-                              extent_state2str(PHO_EXT_ST_ORPHAN));
-    else
-        rc = dss_filter_build(&filter,
-                              "{\"$AND\": ["
-                              "  {\"DSS::EXT::medium_family\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_id\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_library\": \"%s\"}"
-                              "]}", rsc_family2str(source->family),
-                              source->name, source->library);
-    if (rc)
-        LOG_RETURN(rc, "Failed to build filter for extent retrieval");
-
-    rc = dss_extent_get(&adm->dss, &filter, extents, count);
-    dss_filter_free(&filter);
-    if (rc)
-        LOG_RETURN(rc,
-                   "Failed to retrieve (family '%s', name '%s', library '%s') "
-                   "extents",
-                   rsc_family2str(source->family), source->name,
-                   source->library);
-
-    return rc;
-}
-
 static ssize_t _sum_extent_size(struct extent *extents, int count)
 {
     ssize_t total_size = 0;
@@ -1529,7 +1490,7 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
         return rc;
 
     /* Determine total size of live objects */
-    rc = _get_extents(adm, source, &ext_res, &ext_cnt, true);
+    rc = get_extents_from_medium(adm, source, &ext_res, &ext_cnt, true);
     if (rc)
         return rc;
 
@@ -1980,7 +1941,8 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
             continue;
         }
 
-        rc = _get_extents(adm, med_ids + i, &ext_res, &ext_cnt, false);
+        rc = get_extents_from_medium(adm, med_ids + i, &ext_res, &ext_cnt,
+                                     false);
         if (rc)
             goto out_free;
 
@@ -2155,7 +2117,8 @@ int phobos_admin_media_library_rename(struct admin_handle *adm,
             continue;
         }
 
-        rc2 = _get_extents(adm, med_ids + i, &ext_res, &ext_cnt, false);
+        rc2 = get_extents_from_medium(adm, med_ids + i, &ext_res, &ext_cnt,
+                                      false);
         if (rc2) {
             dss_unlock(&adm->dss, DSS_MEDIA, med_res, 1, false);
             dss_res_free(med_res, 1);
