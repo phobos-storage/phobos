@@ -53,3 +53,4 @@ gen-proto.stamp
 /tape_library_certification/phobos_tape_library_test
 doc/man/build/
 gen-man.stamp
+tests/utils/phobosd-client
