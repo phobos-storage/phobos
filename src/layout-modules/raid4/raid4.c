@@ -303,12 +303,9 @@ static int layout_raid4_reconstruct(struct layout_info layout,
                    layout.oid, object_size);
 
     for (int i = 0; i < extent_count; i++) {
-        for (int j = 0; j < 3; j++)
-            if (split_sizes[j] == extents[i].offset) {
-                split_sizes[j] += extents[i].size;
-                break;
-            }
+        int index = (extents[i].layout_idx % 3);
 
+        split_sizes[index] += extents[i].size;
         extent_sizes += extents[i].size;
     }
 
@@ -340,10 +337,6 @@ static int layout_raid4_reconstruct(struct layout_info layout,
     if (extent_sizes == ((3 * object_size + odd) / 2))
         copy->copy_status = PHO_COPY_STATUS_COMPLETE;
     else if (split_sizes[0] + split_sizes[1] == object_size ||
-             /* Special case for odd object size, and we only have the first
-              * half and the XOR as available extents
-              */
-             split_sizes[0] + split_sizes[1] == object_size + odd ||
              split_sizes[0] + split_sizes[2] == object_size + odd ||
              split_sizes[1] + split_sizes[2] == object_size)
         copy->copy_status = PHO_COPY_STATUS_READABLE;

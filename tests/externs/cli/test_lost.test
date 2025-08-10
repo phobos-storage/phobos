@@ -157,13 +157,13 @@ function test_layout_raid4
 
     waive_lrs
 
-    $valg_phobos dir delete --lost ${dirs[0]} ||
-        error "Deletion of ${dirs[0]} should have succeeded"
+    $valg_phobos dir delete --lost ${dirs[1]} ||
+        error "Deletion of ${dirs[1]} should have succeeded"
 
     check_remaining 2 0 1 0 2
 
-    $valg_phobos dir delete --lost ${dirs[1]} ||
-        error "Deletion of ${dirs[1]} should have succeeded"
+    $valg_phobos dir delete --lost ${dirs[0]} ||
+        error "Deletion of ${dirs[0]} should have succeeded"
 
     check_remaining 1 0 0 1 1
 
