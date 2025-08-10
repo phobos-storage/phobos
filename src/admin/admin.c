@@ -2024,6 +2024,18 @@ int phobos_admin_media_import(struct admin_handle *adm,
                        "'%s') to database", rsc_family2str(medium->family),
                        medium->name, medium->library);
 
+        if (medium->family == PHO_RSC_DIR) {
+            struct pho_id device = { .family = PHO_RSC_DIR };
+
+            memcpy(device.name, medium->name, strlen(medium->name));
+            memcpy(device.library, medium->library, strlen(medium->library));
+
+            rc = phobos_admin_device_add(adm, &device, 1, false,
+                                         medium->library);
+            if (rc)
+                return rc;
+        }
+
         rc = import_medium(adm, &med_ls[i], check_hash);
         if (rc)
             LOG_RETURN(rc,

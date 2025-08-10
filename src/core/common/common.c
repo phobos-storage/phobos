@@ -278,6 +278,15 @@ int _normalize_path(char *path)
     size_t len_path;
     char *norm_ptr;
 
+    if (path[0] == '/') {
+        len_path = strlen(path);
+
+        if (path[len_path - 1] == '/')
+            path[len_path - 1] = '\0';
+
+        return 0;
+    }
+
     norm_ptr = realpath(path, norm_path);
     if (norm_ptr == NULL)
         LOG_RETURN(-EINVAL, "Failed to normalize path '%s'", path);
