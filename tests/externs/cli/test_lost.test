@@ -134,8 +134,8 @@ function test_layout_raid1
 
     check_remaining 1 1 1 0 2
 
-    $phobos dir delete --lost ${dirs[1]} ${dirs[2]} ||
-        error "Deletion of ${dirs[1]} and ${dirs[2]} should have succeeded"
+    $phobos dir delete --lost ${dirs[1]} ||
+        error "Deletion of ${dirs[1]} should have succeeded"
 
     check_remaining 0 0 0 2 0
 }
@@ -193,9 +193,56 @@ function test_layout_raid4_odd
     test_layout_raid4 $file
 }
 
+function test_with_import
+{
+    local dirs=("$DIR_TEST_IN/tmp1" "$DIR_TEST_IN/tmp2")
+    local prefix=$(generate_prefix_id)
+    local oid=${prefix}_id
+
+    mkdir ${dirs[@]}
+    $phobos dir add --tags "first" ${dirs[0]}
+    $phobos dir add --tags "second" ${dirs[1]}
+    $phobos dir format --fs posix --unlock ${dirs[@]}
+
+    $phobos put --family dir --layout raid1 --lyt-params "repl_count=2" \
+        /etc/hosts $oid.0 || error "Object $oid.0 should be put"
+    $phobos put --family dir --tags "second" /etc/hosts $oid.1 ||
+        error "Object $oid.1 should be put"
+
+    waive_lrs
+
+    $phobos dir delete --lost ${dirs[0]} ||
+        error "Deletion of ${dirs[0]} should have succeeded"
+
+    check_remaining 1 1 1 0 2
+
+    invoke_lrs
+
+    $phobos dir import --unlock ${dirs[0]} ||
+        error "Import of ${dirs[0]} should have succeeded"
+
+    check_remaining 2 2 0 0 3
+
+    waive_lrs
+
+    $phobos dir delete --lost ${dirs[0]} ${dirs[1]} ||
+        error "Deletion of ${dirs[0]} and ${dirs[1]} should have succeeded"
+
+    check_remaining 0 0 0 2 0
+
+    invoke_lrs
+
+    $phobos dir import --unlock ${dirs[1]} ||
+        error "Import of ${dirs[0]} should have succeeded"
+
+    check_remaining 1 1 1 0 2
+
+}
+
 TESTS=(
     "setup_dir; test_simple; cleanup_dir"
     "setup_dir; test_layout_raid1; cleanup_dir"
     "setup_dir; test_layout_raid4_even; cleanup_dir"
     "setup_dir; test_layout_raid4_odd; cleanup_dir"
+    "setup_dir; test_with_import; cleanup_dir"
 )
