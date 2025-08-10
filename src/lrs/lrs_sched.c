@@ -1300,7 +1300,7 @@ static bool medium_is_write_compatible(struct media_info *medium,
 }
 
 static bool check_locate_expirancy(struct media_info *medium,
-                                          int lock_expirancy)
+                                   int lock_expirancy)
 {
     struct timespec expire;
 

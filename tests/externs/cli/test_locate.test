@@ -224,6 +224,8 @@ function test_last_locate_timestamp
 
     $phobos tape format "${tapes[1]}" ||
         error "Format should have succeeded"
+    
+    date -s @"$(($(date +%s) - 60))"
 }
 
 function test_locate_compatibility
