@@ -1305,7 +1305,8 @@ static bool check_locate_expirancy(struct media_info *medium,
     struct timespec expire;
 
     expire.tv_sec = medium->lock.last_locate.tv_sec + lock_expirancy / 1000;
-    expire.tv_nsec = (lock_expirancy % 1000) * 1000000;
+    expire.tv_nsec = medium->lock.last_locate.tv_usec * 1000 +
+        (lock_expirancy % 1000) * 1000000;
     
     return is_past(expire);
 }
@@ -1379,7 +1380,7 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
             goto unlock_continue;
         }
 
-        if (lock_expirancy != 0) {
+        if (lock_expirancy != 0 && itr->ld_dss_media_info) {
             lrs_medium_update(&itr->ld_dss_media_info->rsc.id);
             if (check_locate_expirancy(itr->ld_dss_media_info,
                                        lock_expirancy)) {
