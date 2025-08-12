@@ -186,10 +186,14 @@ out_hash:
 static int layout_raid4_decode(struct pho_data_processor *decoder)
 {
     struct raid_io_context *io_context;
+    int object_size;
     int rc;
-    int i;
 
     ENTRY;
+
+    object_size = get_object_size_from_layout(decoder->src_layout);
+    if (object_size < 0)
+        return object_size;
 
     io_context = xcalloc(1, sizeof(*io_context));
     decoder->private_reader = io_context;
@@ -212,21 +216,8 @@ static int layout_raid4_decode(struct pho_data_processor *decoder)
     if (rc)
         return rc;
 
-    /* Size is the sum of the extent sizes, decoder->src_layout->wr_size is not
-     * positioned properly by the dss
-     */
-    if (decoder->src_layout->ext_count % 3 != 0)
-        LOG_RETURN(-EINVAL,
-                   "raid4 Xor layout extents count (%d) is not a multiple of 3",
-                   decoder->src_layout->ext_count);
-
-    io_context->read.to_read = 0;
-    decoder->object_size = 0;
-    for (i = 0; i < decoder->src_layout->ext_count; i = i + 3) {
-        io_context->read.to_read += decoder->src_layout->extents[i].size;
-        decoder->object_size += decoder->src_layout->extents[i].size;
-        decoder->object_size += decoder->src_layout->extents[i + 1].size;
-    }
+    io_context->read.to_read = object_size;
+    decoder->object_size = object_size;
 
     /* Empty GET does not need any IO */
     if (decoder->object_size == 0)
