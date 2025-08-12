@@ -76,7 +76,30 @@ function check_remaining
     local extent_count="$($phobos extent list --degroup | wc -l)"
     ((extent_count == $expected_extent_count)) ||
         error "$expected_extent_count extents should remain"
+}
 
+function check_get_success
+{
+    local oid="$1"
+    local file="$2"
+
+    mkdir -p "$(dirname /tmp/$oid)"
+    $phobos -vv get $oid /tmp/$oid ||
+        error "Get on '$oid' should have succeeded"
+
+    diff /tmp/$oid $file
+    rm /tmp/$oid
+}
+
+function check_get_failure
+{
+    local oid="$1"
+
+    mkdir -p "$(dirname /tmp/$oid)"
+    $phobos get $oid /tmp/$oid &&
+        error "Get on '$oid' should have failed"
+
+    return 0
 }
 
 function test_simple
@@ -104,11 +127,22 @@ function test_simple
         error "Deletion of ${dirs[0]} should have succeeded"
 
     check_remaining 2 2 0 1 2
+    invoke_lrs
+    check_get_failure $oid.0
+    waive_lrs
 
     $phobos dir delete --lost ${dirs[1]} ${dirs[2]} ||
         error "Deletion of ${dirs[1]} and ${dirs[2]} should have succeeded"
 
     check_remaining 0 0 0 3 0
+
+    invoke_lrs
+    check_get_failure $oid.0
+    check_get_failure $oid.1
+    check_get_failure $oid.2
+    waive_lrs
+
+    return 0
 }
 
 function test_layout_raid1
@@ -134,10 +168,23 @@ function test_layout_raid1
 
     check_remaining 1 1 1 0 2
 
+    invoke_lrs
+
+    check_get_success $oid.0 /etc/hosts
+    check_get_success $oid.1 /etc/hosts
+    waive_lrs
+
     $phobos dir delete --lost ${dirs[1]} ||
         error "Deletion of ${dirs[1]} should have succeeded"
 
     check_remaining 0 0 0 2 0
+
+    invoke_lrs
+    check_get_failure $oid.0
+    check_get_failure $oid.1
+    waive_lrs
+
+    return 0
 }
 
 function test_layout_raid4
@@ -162,15 +209,29 @@ function test_layout_raid4
 
     check_remaining 2 0 1 0 2
 
+    invoke_lrs
+    check_get_success $oid $file
+    waive_lrs
+
     $valg_phobos dir delete --lost ${dirs[0]} ||
         error "Deletion of ${dirs[0]} should have succeeded"
 
     check_remaining 1 0 0 1 1
 
+    invoke_lrs
+    check_get_failure $oid
+    waive_lrs
+
     $valg_phobos dir delete --lost ${dirs[2]} ||
         error "Deletion of ${dirs[2]} should have succeeded"
 
     check_remaining 0 0 0 1 0
+
+    invoke_lrs
+    check_get_failure $oid
+    waive_lrs
+
+    return 0
 }
 
 function test_layout_raid4_even
@@ -218,10 +279,16 @@ function test_with_import
 
     invoke_lrs
 
+    check_get_success $oid.0 /etc/hosts
+    check_get_success $oid.1 /etc/hosts
+
     $phobos dir import --unlock ${dirs[0]} ||
         error "Import of ${dirs[0]} should have succeeded"
 
     check_remaining 2 2 0 0 3
+
+    check_get_success $oid.0 /etc/hosts
+    check_get_success $oid.1 /etc/hosts
 
     waive_lrs
 
@@ -232,11 +299,16 @@ function test_with_import
 
     invoke_lrs
 
+    check_get_failure $oid.0
+    check_get_failure $oid.1
+
     $phobos dir import --unlock ${dirs[1]} ||
         error "Import of ${dirs[0]} should have succeeded"
 
     check_remaining 1 1 1 0 2
 
+    check_get_success $oid.0 /etc/hosts
+    check_get_success $oid.1 /etc/hosts
 }
 
 TESTS=(
