@@ -59,7 +59,7 @@ def exec_delete_medium_device(obj, dss_type):
     """Remove media or devices."""
     resources = obj.params.get('res')
     lost = obj.params.get('lost')
-    if lost_resource and dss_type != DSS_MEDIA:
+    if lost and dss_type != DSS_MEDIA:
         obj.logger.error("Only a medium can be declared lost")
         sys.exit(os.EX_USAGE)
 

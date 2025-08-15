@@ -65,6 +65,8 @@ function setup_tape
 
     local drives="$(get_lto_drives 6 3)"
     $phobos drive add --unlock $drives
+
+    export TEST_FAMILY="tape"
 }
 
 function cleanup_dir
@@ -72,8 +74,6 @@ function cleanup_dir
     waive_lrs
     cleanup_test_dirs
     drop_tables
-
-    export TEST_FAMILY="tape"
 }
 
 function cleanup_tape
