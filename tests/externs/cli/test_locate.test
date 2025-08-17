@@ -222,10 +222,12 @@ function test_last_locate_timestamp
 
     date -s @"$(($(date +%s) + 60))"
 
-    $phobos tape format "${tapes[1]}" ||
-        error "Format should have succeeded"
+    $phobos tape format "${tapes[1]}"
+    local rc=$?
     
     date -s @"$(($(date +%s) - 60))"
+
+    test $rc -eq 0 || error "Format should have succeeded"
 }
 
 function test_locate_compatibility
