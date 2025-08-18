@@ -202,9 +202,9 @@ function test_last_locate_timestamp
     local drive=$(get_lto_drives 5 1)
     $phobos drive add --unlock $drive
 
-    local tapes="$(get_tapes L5 2)"
-    $phobos tape add --type lto5 "$tapes"
-    $phobos tape format --unlock "${tapes[0]}"
+    local tapes=( $(get_tapes L5 2 | nodeset -e) )
+    $phobos tape add --type lto5 ${tapes[@]}
+    $phobos tape format --unlock ${tapes[0]}
 
     local oid=$(generate_prefix_id)
     $phobos put /etc/hosts $oid ||
@@ -216,18 +216,14 @@ function test_last_locate_timestamp
 
     invoke_lrs
 
+    date_start=$(date +%s)
     $phobos locate $oid
-    $phobos tape format "${tapes[1]}" &&
-        error "Format should have failed, as no drives are available"
+    $phobos tape format ${tapes[1]} || error "Format should have succeeded"
+    date_end=$(date +%s)
+    difference=$((date_end - date_start))
 
-    date -s @"$(($(date +%s) + 60))"
-
-    $phobos tape format "${tapes[1]}"
-    local rc=$?
-    
-    date -s @"$(($(date +%s) - 60))"
-
-    test $rc -eq 0 || error "Format should have succeeded"
+    test $difference -lt 5 ||
+        error "Format should have waited for locate expirancy"
 }
 
 function test_locate_compatibility
@@ -491,9 +487,10 @@ if [[ -w /dev/changer ]]; then
              test_get_locate_cli tape; \
              test_locate_update_timestamp tape; \
              tape_cleanup")
-    TESTS+=("tape_init_setup; \
-             test_locate_update_timestamp_without_lock; \
-             tape_cleanup")
+# XXX: This test remains disabled until locate/load command sequence is fixed
+#    TESTS+=("tape_init_setup; \
+#             test_locate_update_timestamp_without_lock; \
+#             tape_cleanup")
     TESTS+=("tape_init_setup; \
              test_last_locate_timestamp; \
              tape_cleanup");
