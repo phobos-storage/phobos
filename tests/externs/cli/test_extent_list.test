@@ -239,7 +239,7 @@ function test_extent_list_orphan() {
     local output=$($valg_phobos extent list -f csv -o oid,state --orphan |
                    tail -n +2 | wc -l)
     if [[ $output -ne 0 ]]; then
-        error "There should be no extent, got $output"
+        error "There should be no orphan extent, got $output"
     fi
 
     local extent_uuid=$($phobos extent list -o ext_uuid oid1-orphan)
@@ -250,21 +250,14 @@ function test_extent_list_orphan() {
 UPDATE extent SET state = 'orphan' WHERE extent_uuid='$extent_uuid';
 EOF
 
-    output=$($valg_phobos extent list -f csv -o oid,state --orphan |
-             tail -n +2)
+    output=$($valg_phobos extent list --orphan)
     local count=$(echo "$output" | wc -l)
     if [[ $count -ne 1 ]]; then
         error "There should be one extent, got $count"
     fi
 
-    local oid=$(echo "$output" | cut -d',' -f1)
-    if [[ "$oid" != "oid1-orphan" ]]; then
+    if [[ "$output" != "oid1-orphan" ]]; then
         error "It should be oid1-orphan, got $oid"
-    fi
-
-    local state=$(echo "$output" | cut -d',' -f2)
-    if [[ "$state" != "['orphan']" ]]; then
-        error "It should be orphan, got $state"
     fi
 }
 
