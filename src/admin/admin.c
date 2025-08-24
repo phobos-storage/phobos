@@ -1555,8 +1555,9 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     if (rc)
         goto free_tags;
 
-    /* Prepare write allocation */
-    /* Use the same tags of the source medium */
+    /* Prepare write allocation
+     * Use the same tags as the source medium
+     */
     if (tags->count == 0)
         ptr_tags = &src_tags;
     /* Use no tags */
@@ -1570,8 +1571,6 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
                             &iod_target, &target);
     if (rc) {
         free(loc_source.root_path);
-        if (src_tags.count > 0)
-            string_array_free(&src_tags);
 
         _send_and_recv_release(adm, source, &iod_source, 3, NULL, NULL, 0, 0);
         goto free_tags;

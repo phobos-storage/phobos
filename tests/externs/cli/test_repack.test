@@ -147,6 +147,12 @@ function test_simple_repack
 {
     local family=$1
 
+    $phobos tape lock $medium_origin_bis
+    $valg_phobos tape repack $medium_origin &&
+        error "Repack should have failed"
+
+    $phobos tape unlock $medium_origin_bis
+
     # Make 'alt' medium not empty to prevent its selection for repack
     $phobos put -T alt /etc/hosts oid5
 
@@ -223,7 +229,7 @@ function test_raid1_repack
 {
     local family=$1
 
-    $phobos -vv $family repack $medium_origin1
+    $phobos $family repack $medium_origin1
 
     nb=$($phobos object list --deprecated-only | wc -l)
     if [ $nb -ne 0 ]; then
@@ -270,15 +276,14 @@ function test_dedup_repack_setup
 
     $phobos drive add --unlock $drives
     $phobos tape add -t lto5 -T origin $medium_origin
-    $phobos tape add -t lto5 -T origin $medium_other
 
-    $phobos tape format --unlock $media
-    $phobos tape lock $medium_other
+    $phobos tape format --unlock $medium_origin
 
     $phobos put -T origin /etc/hosts oid-1
     $phobos put -T origin /etc/hosts oid-2
 
-    $phobos tape unlock $medium_other
+    $phobos tape add -t lto5 -T origin $medium_other
+    $phobos tape format --unlock $medium_other
 
     object_uuid1=$($phobos object list -o uuid oid-1)
     extent_uuid1=$($phobos extent list --degroup -o ext_uuid oid-1)
@@ -327,36 +332,6 @@ function test_dedup_repack
 
     diff /etc/hosts /tmp/oid-repack-dedup ||
         error "file oid-repack-dedup is not correctly retrieved"
-}
-
-function test_no_tag_repack
-{
-    # Without tags, should repack on a tape with the same tags
-    $phobos tape lock $medium_origin_bis
-    $valg_phobos -vv tape repack $medium_origin &&
-        error "Repack should have failed"
-
-    $phobos tape unlock $medium_origin_bis
-
-    $valg_phobos tape repack $medium_origin ||
-        error "Repack should have succeed"
-
-    nb=$($phobos extent list --name $medium_origin_bis | wc -l)
-    if [ $nb -ne 3 ]; then
-        error "repack should have copied 3 extents to the tagged medium"
-    fi
-
-    nb=$($phobos object list --deprecated-only | wc -l)
-    if [ $nb -ne 0 ]; then
-        error "repack should have deleted deprecated objects"
-    fi
-
-    obj_check
-
-    state=$($phobos tape list -o fs.status $medium_origin)
-    if [ "$state" != "empty" ]; then
-        error "repack should format source medium"
-    fi
 }
 
 function test_tags_repack
@@ -467,7 +442,6 @@ TESTS=("tape_setup;test_simple_repack tape;tape_cleanup"
        "test_raid1_repack_setup;test_raid1_repack tape;tape_cleanup"
        "tape_setup;test_orphan_repack tape;tape_cleanup"
        "test_dedup_repack_setup;test_dedup_repack tape;tape_cleanup"
-        "tape_setup;test_no_tag_repack;tape_cleanup"
        "tape_setup;test_tags_repack;tape_cleanup"
        "tape_setup;test_tags_empty_repack;tape_cleanup"
        "tape_setup bis;test_simple_repack_library_bis;tape_cleanup")
