@@ -335,6 +335,8 @@ static enum io_schedulers str2io_sched(const char *value)
         return IO_SCHED_FIFO;
     else if (!strcmp(value, "grouped_read"))
         return IO_SCHED_GROUPED_READ;
+    else if (!strcmp(value, "grouped_write"))
+        return IO_SCHED_GROUPED_WRITE;
 
     return IO_SCHED_INVAL;
 }
@@ -421,6 +423,9 @@ static int get_io_sched(struct io_sched_handle *io_sched_hdl,
         break;
     case IO_SCHED_GROUPED_READ:
         *ops = IO_SCHED_GROUPED_READ_OPS;
+        break;
+    case IO_SCHED_GROUPED_WRITE:
+        *ops = IO_SCHED_GROUPED_WRITE_OPS;
         break;
     default:
         return -EINVAL;

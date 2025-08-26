@@ -39,6 +39,12 @@
 #include "pho_srl_lrs.h"
 #include "lrs_device.h"
 
+/* Iterate over all the elements in the GList \p list. \p var is used as the
+ * name of the current element in the iteration.
+ */
+#define glist_foreach(var, list) \
+    for (GList *var = list; var; var = var->next)
+
 extern struct pho_config_item cfg_io_sched[];
 
 /** List of I/O scheduler configuration parameters */
@@ -58,6 +64,7 @@ enum io_schedulers {
     IO_SCHED_INVAL = -1,
     IO_SCHED_FIFO,
     IO_SCHED_GROUPED_READ,
+    IO_SCHED_GROUPED_WRITE,
 };
 
 /**
@@ -397,7 +404,7 @@ int io_sched_retry(struct io_sched_handle *io_sched_hdl,
                    struct sub_request *sreq,
                    struct lrs_dev **dev);
 
-/* Remove a specific device from the I/O schedulers that own it
+/* Remove a specific device from the I/O schedulers that owns it
  *
  * \param[in]  io_sched_hdl a valid io_sched_handle
  * \param[in]  device       a device to remove

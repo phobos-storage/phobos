@@ -345,11 +345,11 @@ static int find_read_device(struct io_scheduler *io_sched,
     return 0;
 }
 
-static int find_write_device(struct io_scheduler *io_sched,
-                             struct req_container *reqc,
-                             struct lrs_dev **dev,
-                             size_t index,
-                             bool handle_error)
+int find_write_device(struct io_scheduler *io_sched,
+                      struct req_container *reqc,
+                      struct lrs_dev **dev,
+                      size_t index,
+                      bool handle_error)
 {
     pho_req_write_t *wreq = reqc->req->walloc;
     struct media_info **medium =
