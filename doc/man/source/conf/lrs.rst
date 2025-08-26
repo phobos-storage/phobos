@@ -203,3 +203,22 @@ Example:
 
     [lrs]
     sync_wsize_kb = tape=1048576,dir=1048576,rados_pool=1048576
+
+*locate_lock_expirancy*
+-----------------------
+
+The **locate_lock_expirancy** parameter defines how long a lock must be kept by
+the LRS before eventually releasing it. This allows one to avoid releasing a
+medium too early in case a locate command targeted it. Its specified value is
+in ms, and must be between **0** and **2^64**.
+0 means immediate expirancy, the scheduler will not retain the medium.
+
+If this parameter is not specified, Phobos defaults to the following:
+**locate_lock_expirancy = 0**.
+
+Example:
+
+.. code:: ini
+
+    [lrs]
+    locate_lock_expirancy = 300000
