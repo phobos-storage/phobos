@@ -56,11 +56,8 @@ int get_extents_from_medium(struct admin_handle *adm,
     rc = dss_extent_get(&adm->dss, &filter, extents, count);
     dss_filter_free(&filter);
     if (rc)
-        LOG_RETURN(rc,
-                   "Failed to retrieve (family '%s', name '%s', library '%s') "
-                   "extents",
-                   rsc_family2str(source->family), source->name,
-                   source->library);
+        LOG_RETURN(rc, "Failed to retrieve "FMT_PHO_ID" extents",
+                   PHO_ID(*source));
 
     return rc;
 }

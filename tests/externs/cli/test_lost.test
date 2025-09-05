@@ -120,7 +120,7 @@ function check_get_success
     local file="$2"
 
     mkdir -p "$(dirname /tmp/$oid)"
-    $phobos -vv get $oid /tmp/$oid ||
+    $phobos get $oid /tmp/$oid ||
         error "Get on '$oid' should have succeeded"
 
     diff /tmp/$oid $file
@@ -166,7 +166,7 @@ function test_simple
 
     stop_daemons
 
-    $phobos $TEST_FAMILY delete --lost ${media[0]} ||
+    $valg_phobos $TEST_FAMILY delete --lost ${media[0]} ||
         error "Deletion of ${media[0]} should have succeeded"
 
     check_remaining 2 2 0 1 2
@@ -174,7 +174,7 @@ function test_simple
     check_get_failure $oid.0
     stop_daemons
 
-    $phobos $TEST_FAMILY delete --lost ${media[1]} ${media[2]} ||
+    $valg_phobos $TEST_FAMILY delete --lost ${media[1]} ${media[2]} ||
         error "Deletion of ${media[1]} and ${media[2]} should have succeeded"
 
     check_remaining 0 0 0 3 0
@@ -214,7 +214,7 @@ function test_layout_raid1
 
     stop_daemons
 
-    $phobos $TEST_FAMILY delete --lost ${media[0]} ||
+    $valg_phobos $TEST_FAMILY delete --lost ${media[0]} ||
         error "Deletion of ${media[0]} should have succeeded"
 
     check_remaining 1 1 1 0 2
@@ -225,7 +225,7 @@ function test_layout_raid1
     check_get_success $oid.1 /etc/hosts
     stop_daemons
 
-    $phobos $TEST_FAMILY delete --lost ${media[1]} ||
+    $valg_phobos $TEST_FAMILY delete --lost ${media[1]} ||
         error "Deletion of ${media[1]} should have succeeded"
 
     check_remaining 0 0 0 2 0
@@ -338,7 +338,7 @@ function test_with_import
 
     stop_daemons
 
-    $phobos $TEST_FAMILY delete --lost ${media[0]} ||
+    $valg_phobos $TEST_FAMILY delete --lost ${media[0]} ||
         error "Deletion of ${media[0]} should have succeeded"
 
     check_remaining 1 1 1 0 2
@@ -358,7 +358,7 @@ function test_with_import
 
     stop_daemons
 
-    $phobos $TEST_FAMILY delete --lost ${media[0]} ${media[1]} ||
+    $valg_phobos $TEST_FAMILY delete --lost ${media[0]} ${media[1]} ||
         error "Deletion of ${media[0]} and ${media[1]} should have succeeded"
 
     check_remaining 0 0 0 2 0
@@ -369,7 +369,7 @@ function test_with_import
     check_get_failure $oid.1
 
     $phobos $TEST_FAMILY import --unlock ${media[1]} ||
-        error "Import of ${media[0]} should have succeeded"
+        error "Import of ${media[1]} should have succeeded"
 
     check_remaining 1 1 1 0 2
 

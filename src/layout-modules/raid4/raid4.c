@@ -272,7 +272,6 @@ static int layout_raid4_reconstruct(struct layout_info layout,
     ssize_t split_sizes[3] = {0};
     ssize_t extent_sizes = 0;
     struct extent *extents;
-    const char *buffer;
     int extent_count;
     int object_size;
     int odd;
@@ -280,14 +279,7 @@ static int layout_raid4_reconstruct(struct layout_info layout,
     extent_count = layout.ext_count;
     extents = layout.extents;
 
-    buffer = pho_attr_get(&layout.layout_desc.mod_attrs,
-                          PHO_EA_OBJECT_SIZE_NAME);
-    if (buffer == NULL)
-        LOG_RETURN(-EINVAL,
-                   "Failed to get object size for reconstruction of object '%s'",
-                   layout.oid);
-
-    object_size = str2int64(buffer);
+    object_size = get_object_size_from_layout(&layout);
     if (object_size < 0)
         LOG_RETURN(-EINVAL,
                    "Invalid object size for reconstruction of object '%s': '%d'",
