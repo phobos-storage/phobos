@@ -1,5 +1,5 @@
 #
-#  All rights reserved (c) 2014-2024 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -18,18 +18,18 @@
 #
 
 """
-Delete action for Phobos CLI
+Mput action for Phobos CLI
 """
 
-from phobos.cli.action import ActionOptHandler
-from phobos.cli.common.args import add_object_arguments
+from phobos.cli.action.put import PutOptHandler
 
-class DeleteOptHandler(ActionOptHandler):
-    """Option handler for delete action"""
-    label = 'delete'
-    descr = 'delete a resource'
+class MPutOptHandler(PutOptHandler):
+    """Deprecated, use 'put --file' instead."""
+    label = 'mput'
+    descr = "Deprecated, use 'put --file' instead."
 
     @classmethod
     def add_options(cls, parser):
-        super(DeleteOptHandler, cls).add_options(parser)
-        add_object_arguments(parser)
+        """Add options for the PUT command."""
+        parser.description = "Deprecated, use 'put --file' instead."
+        parser.set_defaults(verb=cls.label)

@@ -1,5 +1,5 @@
 #
-#  All rights reserved (c) 2014-2024 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -18,18 +18,19 @@
 #
 
 """
-Delete action for Phobos CLI
+GetMD action for Phobos CLI
 """
 
 from phobos.cli.action import ActionOptHandler
-from phobos.cli.common.args import add_object_arguments
 
-class DeleteOptHandler(ActionOptHandler):
-    """Option handler for delete action"""
-    label = 'delete'
-    descr = 'delete a resource'
+class GetMDOptHandler(ActionOptHandler):
+    """Retrieve object metadata from backend."""
+    label = 'getmd'
+    descr = 'retrieve object metadata from backend'
 
     @classmethod
     def add_options(cls, parser):
-        super(DeleteOptHandler, cls).add_options(parser)
-        add_object_arguments(parser)
+        """Add options for the GETMD command."""
+        super(GetMDOptHandler, cls).add_options(parser)
+        parser.add_argument('object_id', help='Object to target')
+        parser.set_defaults(verb=cls.label)

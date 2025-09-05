@@ -1,5 +1,5 @@
 #
-#  All rights reserved (c) 2014-2024 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -18,18 +18,20 @@
 #
 
 """
-Delete action for Phobos CLI
+Undelete action for Phobos CLI
 """
 
 from phobos.cli.action import ActionOptHandler
-from phobos.cli.common.args import add_object_arguments
 
-class DeleteOptHandler(ActionOptHandler):
-    """Option handler for delete action"""
-    label = 'delete'
-    descr = 'delete a resource'
+class UndeleteOptHandler(ActionOptHandler):
+    """Undelete objects handler."""
+    label = 'undelete'
+    descr = 'Move back deprecated objects into phobos namespace'
 
     @classmethod
     def add_options(cls, parser):
-        super(DeleteOptHandler, cls).add_options(parser)
-        add_object_arguments(parser)
+        """Add command options for undelete object."""
+        super(UndeleteOptHandler, cls).add_options(parser)
+        parser.set_defaults(verb=cls.label)
+        parser.add_argument('oids', nargs='+', help='Object OIDs to undelete')
+        parser.add_argument('--uuid', help='UUID of the object')

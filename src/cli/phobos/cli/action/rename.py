@@ -1,5 +1,5 @@
 #
-#  All rights reserved (c) 2014-2024 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -18,18 +18,22 @@
 #
 
 """
-Delete action for Phobos CLI
+Rename action for Phobos CLI
 """
 
 from phobos.cli.action import ActionOptHandler
-from phobos.cli.common.args import add_object_arguments
 
-class DeleteOptHandler(ActionOptHandler):
-    """Option handler for delete action"""
-    label = 'delete'
-    descr = 'delete a resource'
+class RenameOptHandler(ActionOptHandler):
+    """Rename object handler"""
+    label = 'rename'
+    descr = 'Change the oid of an object generation, '\
+            'among living or deprecated objects tables.'
 
     @classmethod
     def add_options(cls, parser):
-        super(DeleteOptHandler, cls).add_options(parser)
-        add_object_arguments(parser)
+        """Add command options for object rename."""
+        super(RenameOptHandler, cls).add_options(parser)
+        parser.set_defaults(verb=cls.label)
+        parser.add_argument('oid', help='Object ID to be renamed')
+        parser.add_argument('new_oid', help='New name for the object')
+        parser.add_argument('--uuid', help='UUID of the object to rename')

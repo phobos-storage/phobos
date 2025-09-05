@@ -1,5 +1,5 @@
 #
-#  All rights reserved (c) 2014-2024 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -18,18 +18,20 @@
 #
 
 """
-Delete action for Phobos CLI
+Dump action for Phobos CLI
 """
 
 from phobos.cli.action import ActionOptHandler
-from phobos.cli.common.args import add_object_arguments
+from phobos.cli.common.args import add_log_arguments
 
-class DeleteOptHandler(ActionOptHandler):
-    """Option handler for delete action"""
-    label = 'delete'
-    descr = 'delete a resource'
+class DumpOptHandler(ActionOptHandler):
+    """Handler for persistent logs dumping"""
+    label = "dump"
+    descr = "handler for persistent logs dumping"
+    epilog = """Will dump persistent logs recorded by Phobos to stdout or a file
+    if provided, according to given filters."""
 
     @classmethod
     def add_options(cls, parser):
-        super(DeleteOptHandler, cls).add_options(parser)
-        add_object_arguments(parser)
+        super(DumpOptHandler, cls).add_options(parser)
+        add_log_arguments(parser, "dump")
