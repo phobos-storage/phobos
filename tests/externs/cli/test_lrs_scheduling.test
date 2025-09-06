@@ -253,6 +253,41 @@ EOF
     $phobos dir lock "${DIRS[0]}"
 }
 
+function test_grouped_write_dir()
+{
+    waive_lrs
+    export PHOBOS_IO_SCHED_DIR_write_algo="grouped_write"
+    export PHOBOS_LRS_sync_nb_req="tape=1,dir=4,rados_pool=1"
+    invoke_lrs
+
+    $phobos dir unlock "${DIRS[@]}"
+
+    $phobosd_client -vvv --exit-on-error --stdin << EOF
+batch 4 write 1 -t common
+
+recv write_alloc
+inflight -w 3
+
+release
+recv write_alloc
+inflight -w 2
+
+release
+recv write_alloc
+inflight -w 1
+
+release
+recv write_alloc
+inflight -w 0
+
+release
+batch 4 recv write_release
+quit
+EOF
+
+    $phobos dir lock "${DIRS[0]}"
+}
+
 TESTS=(
     "test_fair_share_conf_at_startup"
     "setup; test_sync_after_put_get; test_conf_set; cleanup"
@@ -260,5 +295,6 @@ TESTS=(
         test_phobosd_client; \
         test_buffered_sync; \
         test_fifo_parallel_write; \
+        test_grouped_write_dir; \
      cleanup_phobosd_client"
 )
