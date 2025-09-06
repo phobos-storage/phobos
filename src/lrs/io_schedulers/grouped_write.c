@@ -144,6 +144,12 @@ struct gw_state {
 
     /** Hash table to quickly find a queue given a device. */
     GHashTable *device_to_queue;
+
+    /** Devices that have been selected by .get_device_medium_pair. Devices
+     * are removed from this list only once the I/O has finished not when the
+     * request is removed from the I/O scheduler.
+     */
+    GPtrArray *busy_devices;
 };
 
 static struct gw_grouping *gw_grouping_new(const char *name)
@@ -196,6 +202,7 @@ static int gw_init(struct io_scheduler *io_sched)
 
     state->device_to_queue = g_hash_table_new(g_direct_hash, g_direct_equal);
     state->free_devices = g_ptr_array_new();
+    state->busy_devices = g_ptr_array_new();
 
     io_sched->private_data = state;
 
@@ -207,6 +214,7 @@ static void gw_fini(struct io_scheduler *io_sched)
     struct gw_state *state = io_sched->private_data;
 
     g_ptr_array_free(state->free_devices, TRUE);
+    g_ptr_array_free(state->busy_devices, TRUE);
     g_hash_table_destroy(state->device_to_queue);
     g_hash_table_destroy(state->queues);
     free(state);
@@ -393,11 +401,36 @@ static struct gw_request *gw_queue_peek(struct gw_queue *queue)
     return g_queue_peek_head(grouping->requests);
 }
 
+static void handle_finished_io(struct gw_state *state)
+{
+    GPtrArray *free_devs = g_ptr_array_new();
+    int i;
+
+    for (i = 0; i < state->busy_devices->len; i++) {
+        struct lrs_dev *dev = state->busy_devices->pdata[i];
+
+        if (!dev_is_sched_ready(dev))
+            continue;
+
+        g_ptr_array_add(free_devs, dev);
+    }
+
+    for (i = 0; i < free_devs->len; i++) {
+        struct lrs_dev *dev = free_devs->pdata[i];
+
+        g_ptr_array_remove(state->free_devices, dev);
+    }
+
+    g_ptr_array_free(free_devs, TRUE);
+}
+
 static int gw_push_request(struct io_scheduler *io_sched,
                            struct req_container *reqc)
 {
     struct gw_state *state = io_sched->private_data;
     struct gw_queue *queue;
+
+    handle_finished_io(state);
 
     assert(pho_request_is_write(reqc->req));
 
@@ -553,6 +586,8 @@ static int gw_peek_request(struct io_scheduler *io_sched,
     struct gw_state *state = io_sched->private_data;
     struct gw_queue *queue = NULL;
 
+    handle_finished_io(state);
+
     *reqc = NULL;
 
     if (state->free_devices->len > 0)
@@ -633,6 +668,7 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
             queue->alloc_index = *index;
             /* reuse the same device */
             *dev = queue->devices[*index];
+            g_ptr_array_add(state->busy_devices, *dev);
             return 0;
         }
     }
@@ -641,6 +677,7 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
     if (queue->devices[*index]) {
         /* The upper layer wants a different device, remove the previous one. */
         g_hash_table_remove(state->device_to_queue, queue->devices[*index]);
+        g_ptr_array_remove(state->busy_devices, queue->devices[*index]);
         queue->devices[*index] = NULL;
     }
 
@@ -650,6 +687,7 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
         return rc;
 
     *dev = queue->devices[*index];
+    g_ptr_array_add(state->busy_devices, *dev);
 
     return 0;
 }
@@ -723,6 +761,7 @@ static int gw_remove_device(struct io_scheduler *io_sched,
 
     g_ptr_array_remove(io_sched->devices, device);
     g_ptr_array_remove(state->free_devices, device);
+    g_ptr_array_remove(state->busy_devices, device);
 
     return 0;
 }
