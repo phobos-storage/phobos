@@ -66,6 +66,7 @@ pho_req_t *make_write_request(int id, int n_media, int size,
                               struct string_array *tags,
                               const char *library);
 
-pho_req_t *make_release_request(const pho_resp_t *resp, int id, bool async);
+pho_req_t *make_release_request(const pho_resp_t *resp, const pho_req_t *walloc,
+                                int id, bool async);
 
 #endif
