@@ -523,11 +523,28 @@ static int gw_requeue(struct io_scheduler *io_sched,
     return 0;
 }
 
+static bool max_concurrent_io_reached(struct gw_state *state,
+                                      struct gw_queue *queue)
+{
+    struct gw_request *req = gw_queue_peek(queue);
+    const char *grouping = walloc_grouping(req->reqc);
+
+    /* XXX for now, limit concurrent I/O to 1 */
+    return current_write_per_grouping_greater_than_max(state->busy_devices,
+                                                       grouping,
+                                                       1);
+}
+
 static int gw_queue_next_request(struct gw_state *state,
                                  struct gw_queue *queue,
                                  struct req_container **reqc)
 {
     struct gw_request *req = gw_queue_peek(queue);
+
+    if (max_concurrent_io_reached(state, queue)) {
+        *reqc = NULL;
+        return 0;
+    }
 
     /* On remove, the queue is deleted if empty. We should always have a
      * request available during peek_request
@@ -597,6 +614,8 @@ static int gw_peek_request(struct io_scheduler *io_sched,
         queue = iter->data;
         if (!queue_busy(state, queue))
             break;
+
+        /* XXX check whether we can add more concurrent I/O for this queue */
 
         queue = NULL;
     }
@@ -687,7 +706,8 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
         return rc;
 
     *dev = queue->devices[*index];
-    g_ptr_array_add(state->busy_devices, *dev);
+    if (*dev)
+        g_ptr_array_add(state->busy_devices, *dev);
 
     return 0;
 }
