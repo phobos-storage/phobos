@@ -78,8 +78,10 @@ void recv_responses(struct pho_comm_info *comm,
     }
     if (rc)
         pho_exit(rc, "failed to receive response");
-    if (n_resps == 0)
+    if (*n_resps == 0) {
+        sleep(1);
         return;
+    }
 
     *resps = xmalloc(*n_resps * sizeof(*resps));
 
@@ -147,7 +149,8 @@ pho_req_t *make_write_request(int id, int n_media, int size,
         resp->ralloc->media[i]->med_id : \
         resp->walloc->media[i]->med_id
 
-pho_req_t *make_release_request(const pho_resp_t *resp, int id, bool async)
+pho_req_t *make_release_request(const pho_resp_t *resp, const pho_req_t *walloc,
+                                int id, bool async)
 {
     bool is_read = pho_response_is_read(resp);
     pho_req_t *req;
@@ -171,7 +174,7 @@ pho_req_t *make_release_request(const pho_resp_t *resp, int id, bool async)
         req->release->media[i]->rc = 0;
         req->release->media[i]->to_sync = async ? false : !is_read;
         req->release->media[i]->size_written = is_read ?
-            0 : resp->walloc->media[0]->avail_size;
+            0 : walloc->walloc->media[0]->size;
         req->release->media[i]->nb_extents_written = is_read ? 0 : 1;
     }
 

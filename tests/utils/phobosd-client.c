@@ -107,6 +107,7 @@ struct client_context {
     bool stopping;
     pthread_t comm_thread;
     GHashTable *responses_by_id;
+    GHashTable *write_reqs_by_id;
     struct signal new_request;
     struct signal new_response;
     size_t n_reads_inflight;
@@ -459,6 +460,7 @@ static int pc_write(struct client_context *ctxt,
 
     write = make_write_request(ctxt->last_id++, n_media, size,
                                family, grouping, &tags, library);
+    g_hash_table_insert(ctxt->write_reqs_by_id, &write->id, write);
     tsqueue_push(&ctxt->requests, write);
     signal_send(&ctxt->new_request);
 
@@ -558,18 +560,24 @@ static int release_n(struct client_context *ctxt, size_t n, bool async)
     g_hash_table_iter_init(&iter, ctxt->responses_by_id);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
         pho_resp_t *resp = value;
+        pho_req_t *walloc;
         pho_req_t *req;
 
         if (n == 0)
             break;
 
+        walloc = g_hash_table_lookup(ctxt->write_reqs_by_id, &resp->req_id);
         if (!pho_response_is_read(resp) &&
             !pho_response_is_write(resp))
             continue;
 
-        req = make_release_request(resp, ctxt->last_id++, async);
+        assert(pho_response_is_read(resp) || walloc);
+
+        req = make_release_request(resp, walloc, ctxt->last_id++, async);
         tsqueue_push(&ctxt->requests, req);
         g_hash_table_iter_remove(&iter);
+        if (walloc)
+            pho_srl_request_free(walloc, false);
         pho_srl_response_free(resp, true);
         n--;
     }
@@ -599,6 +607,7 @@ static int pc_release(struct client_context *ctxt, int argc, char **argv)
         {"num",    no_argument,   0,  'n'},
         {0,        0,             0,  0}
     };
+    pho_req_t *walloc = NULL;
     int64_t n_release = 0;
     pho_resp_t *resp;
     uint32_t req_id;
@@ -638,11 +647,14 @@ static int pc_release(struct client_context *ctxt, int argc, char **argv)
         LOG_RETURN(-ENOENT, "response for request %s not received",
                    argv[1]);
 
+    walloc = g_hash_table_lookup(ctxt->write_reqs_by_id, &req_id);
     tsqueue_push(&ctxt->requests,
-                 make_release_request(resp, ctxt->last_id++, false));
+                 make_release_request(resp, walloc, ctxt->last_id++, false));
     signal_send(&ctxt->new_request);
 
     g_hash_table_remove(ctxt->responses_by_id, &req_id);
+    if (walloc)
+        pho_srl_request_free(walloc, false);
     pho_srl_response_free(resp, true);
 
     return 0;
@@ -656,9 +668,9 @@ static int pc_inflight(struct client_context *ctxt, int argc, char **argv)
         {"releases",    no_argument,       0,  'R'},
         {0,             0,                 0,  0}
     };
-    int64_t n_releases = 0;
-    int64_t n_writes = 0;
-    int64_t n_reads = 0;
+    int64_t n_releases = -1;
+    int64_t n_writes = -1;
+    int64_t n_reads = -1;
     char c;
 
     while ((c = getopt_long(argc, argv, "r:w:R:", options, NULL)) != -1) {
@@ -699,20 +711,20 @@ static int pc_inflight(struct client_context *ctxt, int argc, char **argv)
      * requests have been pushed to phobosd and that the responses have
      * either been received or the thread is blocked in the receive call.
      */
-    if (ctxt->n_reads_inflight != n_reads)
+    if (n_reads != -1 && ctxt->n_reads_inflight != n_reads)
         LOG_RETURN(-EINVAL,
-                   "invalid number of read requests in flight. Expected '%ld', got '%lu",
+                   "invalid number of read requests in flight. Expected '%ld', got '%lu'",
                    n_reads, ctxt->n_reads_inflight);
 
-    if (ctxt->n_writes_inflight != n_writes)
+    if (n_writes != -1 && ctxt->n_writes_inflight != n_writes)
         LOG_RETURN(-EINVAL,
-                   "invalid number of write requests in flight. Expected '%ld', got '%lu",
+                   "invalid number of write requests in flight. Expected '%ld', got '%lu'",
                    n_writes, ctxt->n_writes_inflight);
 
-    if (ctxt->n_releases_inflight != n_releases)
+    if (n_releases != -1 && ctxt->n_releases_inflight != n_releases)
         LOG_RETURN(-EINVAL,
-                   "invalid number of release requests in flight. Expected '%ld', got '%lu",
-                   n_writes, ctxt->n_releases_inflight);
+                   "invalid number of release requests in flight. Expected '%ld', got '%lu'",
+                   n_releases, ctxt->n_releases_inflight);
 
     return 0;
 }
@@ -1044,7 +1056,12 @@ static void *comm_thread(void *data)
                  * an answer.
                  */
                 inflight++;
-            pho_srl_request_free(req, false);
+
+            if (!pho_request_is_write(req))
+                /* We keep writes in the write_reqs_by_id hashtable to build
+                 * the release request. They are freed after the release is built.
+                 */
+                pho_srl_request_free(req, false);
         }
 
         if (inflight == 0) {
@@ -1128,6 +1145,8 @@ int main(int argc, char **argv)
     ctxt.last_id = 1;
     ctxt.responses_by_id = g_hash_table_new(glib_uint32_hash,
                                             glib_uint32_equal);
+    ctxt.write_reqs_by_id = g_hash_table_new(glib_uint32_hash,
+                                             glib_uint32_equal);
     start_comm_thread(&ctxt);
 
     if (argc == skip) {
@@ -1143,6 +1162,7 @@ int main(int argc, char **argv)
 
     stop_comm_thread(&ctxt);
     g_hash_table_destroy(ctxt.responses_by_id);
+    g_hash_table_destroy(ctxt.write_reqs_by_id);
     dss_fini(&ctxt.dss);
 
     return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
