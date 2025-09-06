@@ -465,4 +465,8 @@ size_t io_sched_count_device_per_techno(struct io_scheduler *io_sched,
 
 int io_sched_cfg_section_name(enum rsc_family family, char **section_name);
 
+bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
+                                                 const char *grouping,
+                                                 int max_grouping);
+
 #endif

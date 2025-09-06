@@ -164,9 +164,31 @@ static int max_write_per_grouping(void)
     return concurrent_write_per_grouping;
 }
 
-static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
-                                                        const char *grouping,
-                                                        int max_grouping)
+static bool req_grouping_equal(struct req_container *reqc,
+                               const char *grouping)
+{
+    if (!pho_request_is_write(reqc->req))
+        return false;
+
+    if (!grouping)
+        return reqc->req->walloc->grouping == NULL;
+
+    return reqc->req->walloc->grouping &&
+        !strcmp(reqc->req->walloc->grouping, grouping);
+}
+
+static bool ongoing_grouping_equal(struct ongoing_grouping *ongoing,
+                             const char *grouping)
+{
+    if (!grouping)
+        return ongoing->grouping == NULL;
+
+    return !strcmp(ongoing->grouping, grouping);
+}
+
+bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
+                                                 const char *grouping,
+                                                 int max_grouping)
 {
     GPtrArray *socket_id_array = g_ptr_array_new_full(max_grouping - 1, NULL);
 
@@ -179,15 +201,12 @@ static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
         dev = g_ptr_array_index(devices, i);
         MUTEX_LOCK(&dev->ld_mutex);
         if ((dev->ld_sub_request &&
-             pho_request_is_write(dev->ld_sub_request->reqc->req) &&
-             dev->ld_sub_request->reqc->req->walloc->grouping &&
-             !strcmp(dev->ld_sub_request->reqc->req->walloc->grouping,
-                     grouping) &&
+             req_grouping_equal(dev->ld_sub_request->reqc, grouping) &&
              !g_ptr_array_find(socket_id_array,
                  (gconstpointer)(intptr_t) dev->ld_sub_request->reqc->socket_id,
                  NULL)) ||
-            (dev->ld_ongoing_io && dev->ld_ongoing_grouping.grouping &&
-             !strcmp(dev->ld_ongoing_grouping.grouping, grouping) &&
+            (dev->ld_ongoing_io &&
+             ongoing_grouping_equal(&dev->ld_ongoing_grouping, grouping) &&
              !g_ptr_array_find(socket_id_array,
                  (gconstpointer)(intptr_t) dev->ld_ongoing_grouping.socket_id,
                  NULL))) {
