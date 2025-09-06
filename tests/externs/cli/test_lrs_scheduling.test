@@ -197,6 +197,37 @@ EOF
     $phobos dir lock "${DIRS[@]}"
 }
 
+function test_fifo_parallel_write()
+{
+    waive_lrs
+    export PHOBOS_LRS_sync_nb_req="tape=1,dir=1,rados_pool=1"
+    export PHOBOS_IO_SCHED_DIR_write_algo="fifo"
+    invoke_lrs
+
+    $phobos dir unlock "${DIRS[@]}"
+
+    $phobosd_client -vvv --exit-on-error --stdin << EOF
+batch 6 write 1
+batch 4 recv write_alloc
+inflight -w 2
+
+release -n 1
+recv write_release
+recv write_alloc
+
+inflight -w 1
+release -n 1
+recv write_release
+recv write_alloc
+
+inflight -w 0
+release
+batch 4 recv write_release
+quit
+EOF
+    $phobos dir lock "${DIRS[@]}"
+}
+
 function test_buffered_sync()
 {
     waive_lrs
@@ -228,5 +259,6 @@ TESTS=(
     "setup_phobosd_client; \
         test_phobosd_client; \
         test_buffered_sync; \
+        test_fifo_parallel_write; \
      cleanup_phobosd_client"
 )
