@@ -131,13 +131,22 @@ static int build_layout_writer(struct pho_data_processor *encoder,
                                    sizeof(*encoder->dest_layout));
 
     /* set first object size */
-    if (encoder->xfer->xd_ntargets > 0)
+    if (encoder->type != PHO_PROC_COPIER && encoder->xfer->xd_ntargets > 0)
         encoder->object_size = xfer->xd_targets[0].xt_size;
 
     for (i = 0; i < encoder->xfer->xd_ntargets; i++) {
+        char size_string[16];
+
         encoder->dest_layout[i].oid = xfer->xd_targets[i].xt_objid;
         encoder->dest_layout[i].wr_size = xfer->xd_targets[i].xt_size;
         encoder->dest_layout[i].copy_name = xstrdup(copy_name);
+
+        rc = sprintf(size_string, "%ld", encoder->object_size);
+        if (rc < 0)
+            return rc;
+
+        pho_attr_set(&encoder->dest_layout[i].layout_desc.mod_attrs,
+                     PHO_EA_OBJECT_SIZE_NAME, size_string);
     }
 
     return mod->ops->encode(encoder);
@@ -264,16 +273,16 @@ int layout_copier(struct pho_data_processor *copier, struct pho_xfer_desc *xfer,
     copier->done = false;
     copier->xfer = xfer;
 
-    rc = build_layout_writer(copier, xfer);
-    if (rc) {
-        layout_destroy(copier);
-        LOG_RETURN(rc, "unable to create writer part of a copier");
-    }
-
     rc = build_layout_reader(copier, xfer, layout);
     if (rc) {
         layout_destroy(copier);
         LOG_RETURN(rc, "unable to create reader part of a copier");
+    }
+
+    rc = build_layout_writer(copier, xfer);
+    if (rc) {
+        layout_destroy(copier);
+        LOG_RETURN(rc, "unable to create writer part of a copier");
     }
 
     return rc;
