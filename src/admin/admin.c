@@ -1272,6 +1272,7 @@ static int _get_source_medium(struct admin_handle *adm,
     req.ralloc->med_ids[0]->family = source->family;
     req.ralloc->med_ids[0]->name = xstrdup(source->name);
     req.ralloc->med_ids[0]->library = xstrdup(source->library);
+    req.ralloc->priority = 0;
 
     rc = comm_send_and_recv(&adm->phobosd_comm, &req, &resp);
     if (rc)

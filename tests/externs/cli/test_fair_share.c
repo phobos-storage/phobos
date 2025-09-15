@@ -204,6 +204,7 @@ static void build_read_request(struct context *context)
     req.req.ralloc->med_ids[0]->library = xstrdup(medium->rsc.id.library);
     req.req.ralloc->med_ids[0]->family = PHO_RSC_TAPE;
     req.req.ralloc->n_required = 1;
+    req.req.ralloc->priority = 0;
     req.req.id = context->requests.reads->len;
     req.status = READY;
 

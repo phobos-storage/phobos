@@ -191,6 +191,7 @@ static void send_read(struct pho_comm_info *comm,
 
     pho_srl_request_read_alloc(&req, n_media);
     req.ralloc->n_required = n_required;
+    req.ralloc->priority = 0;
     for (i = 0; i < n_media; i++) {
         req.ralloc->med_ids[i]->name = xstrdup(medium_name[i]);
         req.ralloc->med_ids[i]->library = xstrdup("legacy");

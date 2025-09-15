@@ -65,6 +65,7 @@ message PhoRequest {
         required PhoReadTargetAllocOp operation = 3;
                                             // Operation done on the
                                             // allocation.
+        required uint64 priority       = 4; // Greater means high-priority
     }
 
     /** Body of the release request. */

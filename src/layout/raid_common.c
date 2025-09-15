@@ -476,6 +476,8 @@ static void raid_reader_eraser_build_allocation_req(
         req->ralloc->med_ids[i]->library =
             xstrdup(proc->src_layout->extents[ext_idx].media.library);
     }
+
+    req->ralloc->priority = 0;
 }
 
 static void raid_io_context_set_extent_info(struct raid_io_context *io_context,
