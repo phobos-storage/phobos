@@ -272,7 +272,10 @@ static inline void cancel_response(struct resp_container *respc)
 
 static inline bool client_disconnected_error(int rc)
 {
-    return rc == -EPIPE || rc == -ECONNRESET;
+    /* EBADF: socket was closed by comm API. This is done when
+     * it finds out that the client was disconnected.
+     */
+    return rc == -EPIPE || rc == -ECONNRESET || rc == -EBADF;
 }
 
 static int _send_message(struct pho_comm_info *comm,
