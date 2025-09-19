@@ -339,6 +339,7 @@ static int test_bad_get(void *arg)
     pho_srl_request_read_alloc(&req, 1);
     req.id = 0;
     req.ralloc->n_required = 1;
+    req.ralloc->priority = 0;
     req.ralloc->med_ids[0]->family = PHO_RSC_INVAL;
     req.ralloc->med_ids[0]->name = xstrdup("/tmp/test.pho.1");
     req.ralloc->med_ids[0]->library = xstrdup("legacy");
@@ -378,8 +379,10 @@ static int test_bad_mget(void *arg)
 
     reqs[0].ralloc->med_ids[0]->name = xstrdup("/tmp/test.pho.1");
     reqs[0].ralloc->med_ids[0]->library = xstrdup("legacy");
+    reqs[0].ralloc->priority = 0;
     reqs[1].ralloc->med_ids[0]->name = xstrdup("/not/a/dir");
     reqs[1].ralloc->med_ids[0]->library = xstrdup("legacy");
+    reqs[1].ralloc->priority = 0;
 
     for (i = 0; i < 2; i++) {
         reqs[i].id = i;

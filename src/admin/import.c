@@ -748,6 +748,7 @@ int import_medium(struct admin_handle *adm, struct media_info *medium,
     reqs[0].ralloc->med_ids[0]->family = id.family;
     reqs[0].ralloc->med_ids[0]->name = strdup(id.name);
     reqs[0].ralloc->med_ids[0]->library = strdup(id.library);
+    reqs[0].ralloc->priority = 0;
 
     rc = comm_send_and_recv(&adm->phobosd_comm, &reqs[0], &resp);
     if (rc)
