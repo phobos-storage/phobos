@@ -32,7 +32,7 @@ from ctypes import (byref, c_bool, c_char_p, c_int, c_ssize_t, c_void_p, cast,
                     CFUNCTYPE, pointer, POINTER, py_object, Structure, Union)
 
 from phobos.core.ffi import (LIBPHOBOS, DeprecatedObjectInfo, ObjectInfo,
-                             StringArray, CopyInfo)
+                             StringArray, CopyInfo, Timeval)
 from phobos.core.const import (PHO_XFER_OBJ_REPLACE, PHO_XFER_OBJ_BEST_HOST, # pylint: disable=no-name-in-module
                                PHO_XFER_OBJ_HARD_DEL, PHO_XFER_COPY_HARD_DEL,
                                PHO_XFER_OP_COPY, PHO_XFER_OP_GET,
@@ -365,6 +365,7 @@ class XferTarget(Structure): # pylint: disable=too-many-instance-attributes
         ("xt_fd", c_int),
         ("xt_attrs", PhoAttrs),
         ("xt_size", c_ssize_t),
+        ("xt_copy_ctime", Timeval),
         ("xt_rc", c_int),
     ]
 
