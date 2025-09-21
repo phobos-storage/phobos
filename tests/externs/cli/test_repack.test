@@ -433,6 +433,58 @@ function test_simple_repack_library_bis
     fi
 }
 
+function test_repack_order_ctime
+{
+    local family=$1
+
+    # Make 'alt' medium not empty to prevent its selection for repack
+    $phobos put -T alt /etc/hosts oid5
+
+    local obj_uuid=$($phobos object list -o uuid oid-repack-1)
+    $PSQL << EOF
+UPDATE copy SET creation_time = now() WHERE object_uuid='$obj_uuid';
+EOF
+    $valg_phobos $family repack $medium_origin
+
+    local mount_point=$($phobos drive status -o mount_path | tail -n1)
+    local new_extents=($(find $mount_point -type f -printf "%T@ %f\n" | sort -n | cut -d ' ' -f2 | cut -d '.' -f1))
+
+    local expected=("oid-repack-3" "oid-repack-4" "oid-repack-1")
+
+    for i in 0 1 2; do
+        if [[ "${new_extents[$i]}" != "${expected[$i]}" ]]; then
+           error "Wrong order, it's should be ${expected[$i]}"
+        fi
+    done
+
+    nb=$($phobos extent list --name $medium_alt | wc -l)
+    if [ $nb -ne 1 ]; then
+        error "repack should not have selected a used medium"
+    fi
+
+    nb=$($phobos extent list --name $medium_origin_bis | wc -l)
+    if [ $nb -ne 3 ]; then
+        error "repack should have copied 3 extents to the empty medium"
+    fi
+
+    nb=$($phobos tape list -o stats.nb_obj $medium_origin_bis)
+    if [ $nb -ne 3 ]; then
+        error "tape stats should have said 3 extents were copied"
+    fi
+
+    nb=$($phobos object list --deprecated-only | wc -l)
+    if [ $nb -ne 0 ]; then
+        error "repack should have deleted deprecated objects"
+    fi
+
+    obj_check
+
+    state=$($phobos $family list -o fs.status $medium_origin)
+    if [ "$state" != "empty" ]; then
+        error "repack should format source medium"
+    fi
+}
+
 if [[ ! -w /dev/changer ]]; then
     skip "Library required for this test"
 fi
@@ -445,4 +497,5 @@ TESTS=("tape_setup;test_simple_repack tape;tape_cleanup"
        "test_dedup_repack_setup;test_dedup_repack tape;tape_cleanup"
        "tape_setup;test_tags_repack;tape_cleanup"
        "tape_setup;test_tags_empty_repack;tape_cleanup"
-       "tape_setup bis;test_simple_repack_library_bis;tape_cleanup")
+       "tape_setup bis;test_simple_repack_library_bis;tape_cleanup"
+       "tape_setup;test_repack_order_ctime tape;tape_cleanup")
