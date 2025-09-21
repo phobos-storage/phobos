@@ -896,3 +896,36 @@ out:
 
     return rc;
 }
+
+int dss_get_extents_order_by_ctime(struct dss_handle *handle,
+                                   const struct dss_filter *filter,
+                                   struct extent **extents, int *count)
+{
+    GString *request = g_string_new(NULL);
+    GString *clause = g_string_new(NULL);
+    int rc = 0;
+
+    if (filter) {
+        rc = clause_filter_convert(handle, clause, filter);
+        if (rc)
+            goto out;
+    }
+
+    g_string_append_printf(request,
+            "SELECT extent_uuid, size, offsetof, medium_family, state, "
+            "medium_id, medium_library, address, hash, info FROM extent "
+            "RIGHT JOIN (SELECT extent_uuid, creation_time FROM layout "
+            "LEFT JOIN (SELECT object_uuid, creation_time FROM copy) "
+            "AS inner_table USING (object_uuid)) "
+            "AS outer_table USING (extent_uuid) %s ORDER BY creation_time;",
+            clause->str != NULL ? clause->str : "");
+
+    rc = dss_execute_generic_get(handle, DSS_EXTENT, request,
+                                 (void **) extents, count);
+
+out:
+    g_string_free(request, true);
+    g_string_free(clause, true);
+
+    return rc;
+}
