@@ -1,4 +1,4 @@
-[iosched] - Configuring the I/O scheduling
+[iosched] and [grouped_read] - Configuring the I/O scheduling
 ==========================================
 
 This section explains how to configure the I/O scheduling in Phobos. Currently,
@@ -163,6 +163,23 @@ The **grouped_read** algorithm attempts to group together requests that target
 the same medium. Each request is pushed into the queue of every medium it
 requires. If a medium is already loaded in a device, the request is immediately
 placed in that device's queue.
+
+The **grouped_read** algorithm orders by default its queues conforming to each
+request qos and priority. The qos of all read requests is currently set to 0 and
+the priority is reversely set to the creation time of the corresponding object
+copy. By default, medium per medium, the **grouped_read** algorithm will first
+schedule the requests of the older object copies. This heuristic aims to read
+the extents in the same order than they were written. This could improve
+performance on tape and be useless on dir. One could disable this
+ranking and use a basic fifo order by setting to false the **ordered** option
+of the **grouped_read** config section.
+
+Example:
+
+.. code:: ini
+
+    [grouped_read]
+    ordered = false
 
 *fair_share*
 ------------
