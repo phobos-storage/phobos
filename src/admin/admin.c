@@ -1236,6 +1236,7 @@ static int _get_extents(struct admin_handle *adm,
                                             count);
     else
         rc = dss_extent_get(&adm->dss, &filter, extents, count);
+
     dss_filter_free(&filter);
     if (rc)
         LOG_RETURN(rc,
