@@ -66,6 +66,21 @@
  * and freed.
  */
 
+enum pho_cfg_params_grouped_read {
+    PHO_CFG_GROUPED_READ_ordered,
+
+    PHO_CFG_GROUPED_READ_FIRST = PHO_CFG_GROUPED_READ_ordered,
+    PHO_CFG_GROUPED_READ_LAST = PHO_CFG_GROUPED_READ_ordered,
+};
+
+const struct pho_config_item grouped_read_items[] = {
+    [PHO_CFG_GROUPED_READ_ordered] = {
+        .section = "grouped_read",
+        .name    = "ordered",
+        .value   = "true",
+    },
+};
+
 struct request_queue;
 
 struct list_pair {
@@ -798,6 +813,49 @@ static int allocate_queue_if_loaded(struct io_scheduler *io_sched,
     return 0;
 }
 
+/**
+ * Compare two queue elems using the qos and priority of their request.
+ *
+ * A request with a lower QOS is lower.
+ * If two requests has the same QOS, the one with the lowest priority will be
+ * the lowest.
+ *
+ * This function is used as a parameter of the g_queue_insert_sorted function.
+ */
+static gint qos_priority_request_compare(gconstpointer _queue_elem_a,
+                                         gconstpointer _queue_elem_b,
+                                         gpointer user_data)
+{
+    struct queue_element *queue_elem_a = (struct queue_element *)_queue_elem_a;
+    struct queue_element *queue_elem_b = (struct queue_element *)_queue_elem_b;
+    pho_req_t *req_a = queue_elem_a->reqc->req;
+    pho_req_t *req_b = queue_elem_b->reqc->req;
+
+    if (req_a->qos < req_b->qos)
+        return -1;
+    else if (req_a->qos > req_b->qos)
+        return 1;
+
+    if (req_a->priority < req_b->priority)
+        return -1;
+    else if (req_a->priority > req_b->priority)
+        return 1;
+
+    return 0;
+}
+
+static inline void queue_insert(struct request_queue *queue,
+                                struct queue_element *elem)
+{
+    if (PHO_CFG_GET_BOOL(grouped_read_items, PHO_CFG_GROUPED_READ, ordered,
+                         true))
+
+        g_queue_insert_sorted(queue->queue, elem, qos_priority_request_compare,
+                              NULL);
+    else
+        g_queue_push_head(queue->queue, elem);
+}
+
 static int insert_request_in_medium_queue(struct io_scheduler *io_sched,
                                           struct queue_element *elem,
                                           size_t index)
@@ -818,7 +876,7 @@ static int insert_request_in_medium_queue(struct io_scheduler *io_sched,
         allocate_queue_if_loaded(io_sched, queue);
     }
 
-    g_queue_push_head(queue->queue, elem);
+    queue_insert(queue, elem);
     elem->queue = queue;
 
     return 0;
@@ -982,8 +1040,7 @@ static int grouped_requeue(struct io_scheduler *io_sched,
             elem->pair->free = g_list_concat(elem->pair->free,
                                              elem->pair->used);
             elem->pair->used = NULL;
-
-            g_queue_push_head(queue->queue, elem);
+            queue_insert(queue, elem);
         }
     }
 
