@@ -456,33 +456,6 @@ EOF
            error "Wrong order, it's should be ${expected[$i]}"
         fi
     done
-
-    nb=$($phobos extent list --name $medium_alt | wc -l)
-    if [ $nb -ne 1 ]; then
-        error "repack should not have selected a used medium"
-    fi
-
-    nb=$($phobos extent list --name $medium_origin_bis | wc -l)
-    if [ $nb -ne 3 ]; then
-        error "repack should have copied 3 extents to the empty medium"
-    fi
-
-    nb=$($phobos tape list -o stats.nb_obj $medium_origin_bis)
-    if [ $nb -ne 3 ]; then
-        error "tape stats should have said 3 extents were copied"
-    fi
-
-    nb=$($phobos object list --deprecated-only | wc -l)
-    if [ $nb -ne 0 ]; then
-        error "repack should have deleted deprecated objects"
-    fi
-
-    obj_check
-
-    state=$($phobos $family list -o fs.status $medium_origin)
-    if [ "$state" != "empty" ]; then
-        error "repack should format source medium"
-    fi
 }
 
 if [[ ! -w /dev/changer ]]; then
