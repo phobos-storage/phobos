@@ -806,6 +806,9 @@ static int allocate_queue_if_loaded(struct io_scheduler *io_sched,
  * If two requests has the same QOS, the one with the lowest priority will be
  * the lowest.
  *
+ * This internal function is to order the queue. Lower here means from the queue
+ * order.
+ *
  * This function is used as a parameter of the g_queue_insert_sorted function.
  */
 static gint qos_priority_request_compare(gconstpointer _queue_elem_a,

@@ -170,10 +170,10 @@ currently set to 0 and the priority is reversely set to the creation time of the
 corresponding object copy. By default, medium per medium, the **grouped_read**
 algorithm will first schedule the requests of the older object copies. This
 scheduling heuristic aims to order the extent reading in the same order as they
-were written. This could improve performance on tape and be useless on dir.
-One could disable this ranking and use a basic fifo order by setting to false
-the **ordered_grouped_read** option of the corresponding **[io_sched_dir]** or
-**[io_sched_tape]** config section.
+were written. This feature may improve performance on tape but may have no
+impact on directories. One could disable this ranking and use a basic fifo order
+by setting to false the **ordered_grouped_read** option of the corresponding
+**[io_sched_dir]** or **[io_sched_tape]** config section.
 
 Example:
 
