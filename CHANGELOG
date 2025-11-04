@@ -3,8 +3,6 @@
 ## Next
  * WARNING: change the `phobos ping [phobosd|tlc]` command to
    `phobos phobosd ping` and `phobos tlc ping`
- * WARNING: change the pho_xfer_target structure by adding the returned ctime
-   of the source copy of a GET or COPY
  * store: existing object grouping is now taken into account when creating a
    copy
 ## 3.1.0

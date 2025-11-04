@@ -468,8 +468,7 @@ static void raid_reader_eraser_build_allocation_req(
     req->has_qos = true;
     req->qos = 0;
     req->has_priority = true;
-    req->priority = priority_from_ctime(
-        proc->xfer->xd_targets[proc->current_target].xt_copy_ctime);
+    req->priority = priority_from_ctime(proc->src_copy_ctime);
     req->ralloc->n_required =
         is_eraser(proc) ? n_extents : io_context->n_data_extents;
     req->ralloc->operation =
