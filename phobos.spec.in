@@ -142,10 +142,13 @@ echo "%{_libdir}/phobos" > %{buildroot}/%{_sysconfdir}/ld.so.conf.d/phobos.conf
 mkdir %{buildroot}/%{_sysconfdir}/bash_completion.d
 register-python-argcomplete phobos > %{buildroot}/%{_sysconfdir}/bash_completion.d/phobos-argcomplete.sh
 
+mkdir -p %{buildroot}/%{_sharedstatedir}/phobos
+
 %files
 
 %{_libdir}/libphobos_store.so*
 %{_libdir}/libphobos_admin.so*
+%{_libdir}/phobos/libpho_core.so*
 %{_libdir}/phobos/libpho_*_dir.so*
 %{_libdir}/phobos/libpho_*_tape.so*
 %{_libdir}/phobos/libpho_*_ltfs.so*
@@ -167,6 +170,7 @@ register-python-argcomplete phobos > %{buildroot}/%{_sysconfdir}/bash_completion
 %{_sbindir}/phobos_tape_library_mtx_test.bash
 %{_sbindir}/phobos_tlc
 %{_unitdir}/phobos_tlc.service
+%{_sbindir}/phobos_hsm_sync_dir
 %{_mandir}/man1/*
 
 %config(noreplace) %{_sysconfdir}/phobos.conf
@@ -174,6 +178,8 @@ register-python-argcomplete phobos > %{buildroot}/%{_sysconfdir}/bash_completion
 %dir %{phobosdocdir}
 %doc %{phobosdocdir}/README.md
 %doc %{phobosdocdir}/template.conf
+
+%dir %{_sharedstatedir}/phobos
 
 %files devel
 

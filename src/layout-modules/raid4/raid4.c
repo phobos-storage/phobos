@@ -186,14 +186,9 @@ out_hash:
 static int layout_raid4_decode(struct pho_data_processor *decoder)
 {
     struct raid_io_context *io_context;
-    int object_size;
     int rc;
 
     ENTRY;
-
-    object_size = get_object_size_from_layout(decoder->src_layout);
-    if (object_size < 0)
-        return object_size;
 
     io_context = xcalloc(1, sizeof(*io_context));
     decoder->private_reader = io_context;
@@ -216,8 +211,7 @@ static int layout_raid4_decode(struct pho_data_processor *decoder)
     if (rc)
         return rc;
 
-    io_context->read.to_read = object_size;
-    decoder->object_size = object_size;
+    io_context->read.to_read = decoder->object_size;
 
     /* Empty GET does not need any IO */
     if (decoder->object_size == 0)

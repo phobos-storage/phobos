@@ -511,6 +511,7 @@ int object_md_save(struct dss_handle *dss, struct pho_xfer_target *xfer,
     obj.oid = xfer->xt_objid;
     obj.user_md = md_repr->str;
     obj.grouping = grouping;
+    obj.size = xfer->xt_size;
 
     rc = dss_lock(dss, DSS_OBJECT, &obj, 1);
     if (rc)
@@ -567,6 +568,7 @@ int object_md_save(struct dss_handle *dss, struct pho_xfer_target *xfer,
         save_obj_res_grouping = obj_res->grouping;
         obj_res->grouping = grouping;
         ++obj_res->version;
+        obj_res->size = xfer->xt_size;
         if (!pho_attrs_is_empty(&xfer->xt_attrs))
             obj_res->user_md = md_repr->str;
 
@@ -1014,6 +1016,7 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
     /* can't get md for undel without any objid */
     /* TODO: really necessary to create decoder for getmd, del and undel OP ? */
     if (xfer->xd_op != PHO_XFER_OP_UNDEL && xfer->xd_op != PHO_XFER_OP_GET &&
+        xfer->xd_op != PHO_XFER_OP_COPY &&
         (xfer->xd_op != PHO_XFER_OP_DEL &&
          !(xfer->xd_flags & PHO_XFER_OBJ_HARD_DEL))) {
         rc = object_md_get(dss, xfer->xd_targets);
@@ -1058,6 +1061,19 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
         LOG_RETURN(rc, "Cannot find object for objid:'%s'",
                    xfer->xd_targets->xt_objid);
 
+    /* This object size set is necessary for non-put commands because we can
+     * only handle one target at a time. However for the put command, it is
+     * mostly useless, as we may have multiple targets in a single call, each
+     * with their own object sizes. The actual object sizes are thus properly
+     * handled later down the "put" line.
+     */
+    proc->object_size = obj->size;
+
+    /* use existing grouping as default for copy */
+    /* put grouping attribute must not be preset for a copy operation */
+    if (proc->type == PHO_PROC_COPIER)
+        xfer->xd_params.copy.put.grouping = xstrdup_safe(obj->grouping);
+
     rc = get_copy(dss, xfer, obj, &copy);
     if (rc)
         return rc;
@@ -1074,6 +1090,7 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
         pho_warn("Copy '%s' status for the object '%s' is %s", copy->copy_name,
                  obj->oid, copy_status2str(copy->copy_status));
 
+    proc->src_copy_ctime = copy->creation_time;
     rc = copy_object_info_into_xfer(obj, xfer->xd_targets);
     object_info_free(obj);
     if (rc)
@@ -1181,7 +1198,8 @@ static int store_end_encoder_xfer(struct phobos_handle *pho,
 
         pho_debug("Saving layout for objid:'%s'", xfer->xd_targets[i].xt_objid);
         rc = dss_extent_insert(&pho->dss, encoder->dest_layout[i].extents,
-                               encoder->dest_layout[i].ext_count);
+                               encoder->dest_layout[i].ext_count,
+                               DSS_SET_FULL_INSERT);
         if (rc)
             LOG_RETURN(rc, "Error while saving extents for objid: '%s'",
                        xfer->xd_targets[i].xt_objid);
@@ -2007,20 +2025,25 @@ clean:
 
 static void xfer_put_param_clean(struct pho_xfer_desc *xfer)
 {
-    struct pho_xfer_put_params *put_params;
+    string_array_free(&xfer->xd_params.put.tags);
+    pho_attrs_free(&xfer->xd_params.put.lyt_params);
+}
 
-    if (xfer->xd_op == PHO_XFER_OP_COPY)
-        put_params = &xfer->xd_params.copy.put;
-    else
-        put_params = &xfer->xd_params.put;
-
-    string_array_free(&put_params->tags);
-    pho_attrs_free(&put_params->lyt_params);
+static void xfer_copy_param_clean(struct pho_xfer_desc *xfer)
+{
+    free((void *)xfer->xd_params.copy.put.grouping);
+    xfer->xd_params.copy.put.grouping = NULL;
+    string_array_free(&xfer->xd_params.copy.put.tags);
+    pho_attrs_free(&xfer->xd_params.copy.put.lyt_params);
 }
 
 static void (*xfer_param_cleaner[PHO_XFER_OP_LAST])(struct pho_xfer_desc *) = {
-    xfer_put_param_clean,
-    NULL,
+    [PHO_XFER_OP_PUT]   = xfer_put_param_clean,
+    [PHO_XFER_OP_GET]   = NULL,
+    [PHO_XFER_OP_GETMD] = NULL,
+    [PHO_XFER_OP_DEL]   = NULL,
+    [PHO_XFER_OP_UNDEL] = NULL,
+    [PHO_XFER_OP_COPY]  = xfer_copy_param_clean,
 };
 
 void pho_xfer_desc_clean(struct pho_xfer_desc *xfer)
@@ -2123,6 +2146,15 @@ int phobos_copy(struct pho_xfer_desc *xfers, size_t n,
         return rc;
 
     for (i = 0; i < n; i++) {
+        if (xfers[i].xd_params.copy.put.grouping) {
+            pho_error(rc = -EINVAL,
+                      "A xfer to create a new copy must not have a grouping "
+                      "put param because the grouping is inherited from the "
+                      "existing object. \"%s\" was set instead of NULL.",
+                      xfers[i].xd_params.put.grouping);
+            return rc;
+        }
+
         xfers[i].xd_op = PHO_XFER_OP_COPY;
         xfers[i].xd_rc = 0;
         for (j = 0; j < xfers[i].xd_ntargets; j++)

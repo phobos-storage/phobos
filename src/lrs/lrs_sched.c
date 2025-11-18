@@ -188,13 +188,15 @@ static int check_dev_info(const struct lrs_dev *dev)
 /**
  * Lock the corresponding item into the global DSS and update the local lock
  *
- * @param[in]       dss     DSS handle
- * @param[in]       type    DSS type of the item
- * @param[in]       item    item to lock
- * @param[in, out]  lock    already allocated lock to update
+ * @param[in]       dss          DSS handle
+ * @param[in]       type         DSS type of the item
+ * @param[in]       item         item to lock
+ * @param[in]       last_locate  early locate timestamp
+ * @param[in, out]  lock         already allocated lock to update
  */
 static int take_and_update_lock(struct dss_handle *dss, enum dss_type type,
-                                void *item, struct pho_lock *lock)
+                                void *item, struct timeval *last_locate,
+                                struct pho_lock *lock)
 {
     int rc2;
     int rc;
@@ -206,7 +208,12 @@ static int take_and_update_lock(struct dss_handle *dss, enum dss_type type,
              type == DSS_MEDIA ?
              ((struct media_info *)item)->rsc.id.name :
              "???");
-    rc = dss_lock(dss, type, item, 1);
+
+    if (last_locate)
+        rc = dss_lock_with_last_locate(dss, type, item, 1, last_locate);
+    else
+        rc = dss_lock(dss, type, item, 1);
+
     if (rc)
         pho_error(rc, "Unable to get lock on item for refresh");
 
@@ -261,7 +268,7 @@ static int check_renew_owner(struct lock_handle *lock_handle,
 
         /* get the lock again */
         rc = take_and_update_lock(lock_handle->dss, type, item,
-                                  lock);
+                                  &lock->last_locate, lock);
         if (rc)
             LOG_RETURN(rc, "Unable to get and refresh lock");
     }
@@ -286,29 +293,6 @@ static int check_renew_lock(struct lock_handle *lock_handle, enum dss_type type,
     }
 
     return check_renew_owner(lock_handle, type, item, lock);
-}
-
-int check_and_take_device_lock(struct lrs_sched *sched,
-                               struct dev_info *dev)
-{
-    int rc;
-
-    if (dev->lock.hostname) {
-        rc = check_renew_lock(&sched->lock_handle, DSS_DEVICE, dev, &dev->lock);
-        if (rc)
-            LOG_RETURN(rc,
-                       "Unable to check and renew lock of one of our devices "
-                       "'%s'", dev->rsc.id.name);
-    } else {
-        rc = take_and_update_lock(&sched->sched_thread.dss, DSS_DEVICE, dev,
-                                  &dev->lock);
-        if (rc)
-            LOG_RETURN(rc,
-                       "Unable to acquire and update lock on device '%s'",
-                       dev->rsc.id.name);
-    }
-
-    return 0;
 }
 
 /**
@@ -341,7 +325,7 @@ static int ensure_medium_lock(struct lock_handle *lock_handle,
         rc = check_renew_lock(lock_handle, DSS_MEDIA, medium, &medium->lock);
     } else {
     /* Try to take lock */
-        rc = take_and_update_lock(lock_handle->dss, DSS_MEDIA, medium,
+        rc = take_and_update_lock(lock_handle->dss, DSS_MEDIA, medium, NULL,
                                   &medium->lock);
     }
 
@@ -493,7 +477,7 @@ int sched_fill_dev_info(struct lrs_sched *sched, struct lib_handle *lib_hdl,
         /* get lock for loaded media */
         if (!dev->ld_dss_media_info->lock.hostname) {
             rc = take_and_update_lock(&sched->sched_thread.dss, DSS_MEDIA,
-                                      dev->ld_dss_media_info,
+                                      dev->ld_dss_media_info, NULL,
                                       &dev->ld_dss_media_info->lock);
             if (rc) {
                 const struct pho_id *med_id = lrs_dev_med_id(dev);
@@ -1160,11 +1144,6 @@ int sched_select_medium(struct io_scheduler *io_sched,
                 /* not locked by myself */
                 continue;
 
-        rc = dss_medium_health(lock_handle->dss, &curr->rsc.id, max_health(),
-                               &curr->health);
-        if (rc)
-            continue;
-
         /* already loaded and in use ? */
         dev = search_in_use_medium(io_sched->io_sched_hdl->global_device_list,
                                    curr->rsc.id.name, curr->rsc.id.library,
@@ -1224,6 +1203,12 @@ int sched_select_medium(struct io_scheduler *io_sched,
 
     /* Don't rely on existing lock for future use */
     pho_lock_clean(&chosen_media->lock);
+
+
+    rc = dss_medium_health(lock_handle->dss, &chosen_media->rsc.id,
+                           max_health(), &chosen_media->health);
+    if (rc)
+        goto free_res;
 
     *p_media = lrs_medium_insert(chosen_media);
     if (!*p_media)
@@ -1299,6 +1284,23 @@ static bool medium_is_write_compatible(struct media_info *medium,
     return true;
 }
 
+static bool check_locate_expirancy(struct media_info *medium,
+                                   int lock_expirancy)
+{
+    struct timespec expire;
+
+    expire.tv_nsec = medium->lock.last_locate.tv_usec * 1000 +
+        (lock_expirancy % 1000) * 1000000;
+    expire.tv_sec = medium->lock.last_locate.tv_sec + lock_expirancy / 1000;
+
+    if (expire.tv_nsec >= 1000000000) {
+        expire.tv_nsec %= 1000000000;
+        expire.tv_sec += 1;
+    }
+
+    return !is_past(expire);
+}
+
 /**
  * Device selection policy prototype.
  * @param[in]     required_size required space to perform the write operation.
@@ -1345,6 +1347,7 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
 {
     struct lrs_dev *selected = NULL;
     int selected_i = -1;
+    int lock_expirancy;
     int rc;
     int i;
 
@@ -1352,6 +1355,9 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
 
     if (one_drive_available)
         *one_drive_available = false;
+
+    lock_expirancy = PHO_CFG_GET_INT(cfg_lrs, PHO_CFG_LRS,
+                                     locate_lock_expirancy, 0);
 
     for (i = 0; i < devices->len; i++) {
         struct lrs_dev *itr = g_ptr_array_index(devices, i);
@@ -1362,6 +1368,19 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
             itr->ld_ongoing_scheduled) {
             pho_debug("Skipping busy device '%s'", itr->ld_dev_path);
             goto unlock_continue;
+        }
+
+        if (lock_expirancy != 0 && itr->ld_dss_media_info) {
+            struct media_info *medium = lrs_medium_update(
+                &itr->ld_dss_media_info->rsc.id);
+
+            if (check_locate_expirancy(medium, lock_expirancy)) {
+                lrs_medium_release(medium);
+                pho_debug("Skipping device '%s' with reserved medium",
+                          itr->ld_dev_path);
+                goto unlock_continue;
+            }
+            lrs_medium_release(medium);
         }
 
         if (dev_is_failed(itr)) {
@@ -2949,6 +2968,8 @@ static void sched_fetch_device_status(struct lrs_dev *device,
                          device->ld_sys_dev_state.lds_serial);
     _json_object_set_str(device_status, "currently_dedicated_to",
                          device_request_type2str(device, request_type));
+    _json_object_set_str(device_status, "adm_status",
+                   rsc_adm_status2str(device->ld_dss_dev_info->rsc.adm_status));
 
     integer = json_integer(device->ld_lib_dev_info.ldi_addr.lia_addr -
                            device->ld_lib_dev_info.ldi_first_addr);

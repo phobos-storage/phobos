@@ -510,10 +510,10 @@ int dss_move_object_to_deprecated(struct dss_handle *handle,
                            "WITH moved_object AS"
                            " (DELETE FROM object WHERE %s RETURNING"
                            "  oid, object_uuid, version, user_md,"
-                           "  creation_time)"
+                           "  creation_time, size)"
                            " INSERT INTO deprecated_object"
                            "  (oid, object_uuid, version, user_md,"
-                           "   creation_time)"
+                           "   creation_time, size)"
                            " SELECT * FROM moved_object",
                            oid_list->str);
 
@@ -589,9 +589,9 @@ int dss_move_deprecated_to_object(struct dss_handle *handle,
                            "WITH risen_object AS"
                            " (DELETE FROM deprecated_object WHERE %s"
                            "  RETURNING oid, object_uuid,"
-                           "  version, user_md, creation_time)"
+                           "  version, user_md, creation_time, size)"
                            " INSERT INTO object (oid, object_uuid, "
-                           "  version, user_md, creation_time)"
+                           "  version, user_md, creation_time, size)"
                            " SELECT * FROM risen_object",
                            oid_list->str);
 
@@ -777,7 +777,7 @@ int dss_lazy_find_copy(struct dss_handle *handle, const char *uuid,
     }
 
     rc = get_cfg_preferred_order(&preferred_order, &count);
-    if (rc)
+    if (rc != 0 && rc != -ENODATA)
         return rc;
 
     for (i = 0; i < count; ++i) {
@@ -889,6 +889,89 @@ int dss_get_living_and_deprecated_objects(struct dss_handle *handle,
 
     rc = dss_execute_generic_get(handle, DSS_DEPREC, request, (void **) objs,
                                  n_objs);
+
+out:
+    g_string_free(request, true);
+    g_string_free(clause, true);
+
+    return rc;
+}
+
+int dss_check_and_take_lock(struct dss_handle *handle,
+                            struct pho_id *id,
+                            struct pho_lock *lock,
+                            enum dss_type resource_type,
+                            void *resource,
+                            const char *hostname, int pid)
+{
+    int rc;
+
+    if (lock->hostname) {
+        if (strcmp(lock->hostname, hostname))
+            LOG_RETURN(-EALREADY,
+                       "resource "FMT_PHO_ID" is already locked by "
+                       "host '%s', owner/pid '%d' but current process on '%s'",
+                       PHO_ID(*id), lock->hostname, lock->owner, hostname);
+
+        if (lock->owner != pid) {
+            if (!lock->is_early)
+                LOG_RETURN(-EALREADY,
+                           "resource "FMT_PHO_ID" is already locked by "
+                           "host '%s', owner/pid '%d' but current process "
+                           "has pid '%d' on host '%s'",
+                           PHO_ID(*id), lock->hostname, lock->owner, pid,
+                           hostname);
+
+            rc = dss_unlock(handle, resource_type, resource, 1, true);
+            if (rc)
+                LOG_RETURN(rc,
+                           "unable to clear previous lock on "
+                           "resource "FMT_PHO_ID,
+                           PHO_ID(*id));
+
+            rc = dss_lock_hostname(handle, resource_type, resource, 1,
+                                   lock->hostname);
+            if (rc)
+                LOG_RETURN(rc, "unable to lock item "FMT_PHO_ID,
+                           PHO_ID(*id));
+        }
+    } else {
+        rc = dss_lock(handle, resource_type, resource, 1);
+        if (rc)
+            LOG_RETURN(rc,
+                       "admin host '%s' owner/pid '%d' failed to lock the "
+                       "resource"FMT_PHO_ID,
+                       hostname, pid, PHO_ID(*id));
+    }
+
+    return 0;
+}
+
+int dss_get_extents_order_by_ctime(struct dss_handle *handle,
+                                   const struct dss_filter *filter,
+                                   struct extent **extents, int *count)
+{
+    GString *request = g_string_new(NULL);
+    GString *clause = g_string_new(NULL);
+    int rc = 0;
+
+    if (filter) {
+        rc = clause_filter_convert(handle, clause, filter);
+        if (rc)
+            goto out;
+    }
+
+    g_string_append_printf(request,
+            "SELECT extent_uuid, size, offsetof, medium_family, state, "
+            "medium_id, medium_library, address, hash, info, "
+            "extent.creation_time FROM layout "
+            "JOIN extent USING (extent_uuid) JOIN copy USING "
+            "(object_uuid, version, copy_name) %s "
+            "ORDER BY copy.creation_time;",
+            clause->str != NULL ? clause->str : "");
+
+    rc = dss_execute_generic_get(handle, DSS_EXTENT, request,
+                                 (void **) extents, count);
 
 out:
     g_string_free(request, true);

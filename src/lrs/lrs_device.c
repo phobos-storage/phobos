@@ -258,7 +258,10 @@ int lrs_dev_hdl_add(struct lrs_sched *sched,
     if (rc)
         goto free_list;
 
-    rc = check_and_take_device_lock(sched, dev_list);
+    rc = dss_check_and_take_lock(&sched->sched_thread.dss, &dev_list->rsc.id,
+                                 &dev_list->lock, DSS_DEVICE, dev_list,
+                                 sched->lock_handle.lock_hostname,
+                                 sched->lock_handle.lock_owner);
     if (rc)
         lrs_dev_hdl_del(handle, handle->ldh_devices->len, rc, sched);
 
@@ -388,7 +391,12 @@ int lrs_dev_hdl_load(struct lrs_sched *sched, struct lrs_dev_hdl *handle)
             continue;
         }
 
-        rc2 = check_and_take_device_lock(sched, &dev_list[i]);
+        rc2 = dss_check_and_take_lock(&sched->sched_thread.dss,
+                                      &dev_list[i].rsc.id,
+                                      &dev_list[i].lock, DSS_DEVICE,
+                                      &dev_list[i],
+                                      sched->lock_handle.lock_hostname,
+                                      sched->lock_handle.lock_owner);
         if (rc2) {
             lrs_dev_hdl_del(handle, handle->ldh_devices->len - 1, rc2, sched);
             rc = rc ? : rc2;
@@ -487,7 +495,12 @@ static int dev_wait_for_signal(struct lrs_dev *dev)
     struct timespec time;
     int rc;
 
+    /* Need a mutex because the lrs main thread can update the
+     * ls_sync_params.oldest_tosync value
+     */
+    MUTEX_LOCK(&dev->ld_mutex);
     rc = compute_wakeup_date(dev, &time);
+    MUTEX_UNLOCK(&dev->ld_mutex);
     if (rc)
         return rc;
 
@@ -579,18 +592,8 @@ static void clean_tosync_array(struct lrs_dev *dev, int rc)
                 /* If it is a partial request, it means that the client has not
                  * finished writing
                  */
-                if (req->reqc->req->release->partial) {
-                    pho_req_release_elt_t *media =
-                        req->reqc->req->release->media[req->medium_index];
-                    const char *grouping = media->grouping;
-
+                if (req->reqc->req->release->partial)
                     dev->ld_ongoing_io = true;
-                    if (grouping) {
-                        dev->ld_ongoing_grouping.grouping = xstrdup(grouping);
-                        dev->ld_ongoing_grouping.socket_id =
-                            req->reqc->socket_id;
-                    }
-                }
             }
         } else {
             req->reqc = NULL;   /* only the last device free reqc */
@@ -638,7 +641,6 @@ void push_new_sync_to_device(struct lrs_dev *dev, struct req_container *reqc,
     req_tosync->reqc = reqc;
     req_tosync->medium_index = medium_index;
 
-    MUTEX_LOCK(&dev->ld_mutex);
     if (tosync_rc(reqc, medium_index) != 0)
         dev->ld_last_client_rc = tosync_rc(reqc, medium_index);
 
@@ -651,6 +653,11 @@ void push_new_sync_to_device(struct lrs_dev *dev, struct req_container *reqc,
 
     /* Set ld_needs_sync to true to avoid waiting until the threshold are
      * exceeded
+     *
+     * This is really important for the partial release mecanism because
+     * no new IO should be scheduled even if the ld_ongoing_io flag is
+     * transiently set to true to allow the sync. For a partial release, the
+     * sync will set back the ld_ongoing_io to true.
      */
     if (reqc->req->release->partial)
         dev->ld_needs_sync = true;
@@ -660,8 +667,6 @@ void push_new_sync_to_device(struct lrs_dev *dev, struct req_container *reqc,
         string_array_add(dev_medium_groupings, sync_grouping);
         sync_params->groupings_to_update = true;
     }
-
-    MUTEX_UNLOCK(&dev->ld_mutex);
 
     thread_signal(&dev->ld_device_thread);
 }
@@ -2091,8 +2096,6 @@ static void dev_thread_end(struct lrs_dev *device)
         free(device->ld_ongoing_grouping.grouping);
         device->ld_ongoing_grouping.grouping = NULL;
     }
-
-    MUTEX_UNLOCK(&device->ld_mutex);
 }
 
 static int dev_perform_sync(struct lrs_dev *device, struct thread_info *thread)

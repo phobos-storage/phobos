@@ -38,11 +38,11 @@
 /** Specific intern functions used for testing. */
 int _dss_lock(struct dss_handle *handle, enum dss_type type,
               const void *item_list, int item_cnt, const char *lock_hostname,
-              int lock_pid, bool is_early);
+              int lock_pid, bool is_early, struct timeval *last_locate);
 
 int _dss_lock_refresh(struct dss_handle *handle, enum dss_type type,
                       const void *item_list, int item_cnt,
-                      const char *lock_hostname, int lock_owner);
+                      const char *lock_hostname, int lock_owner, bool locate);
 
 int _dss_unlock(struct dss_handle *handle, enum dss_type type,
                 const void *item_list, int item_cnt, const char *lock_hostname,

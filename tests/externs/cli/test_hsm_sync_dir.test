@@ -1,0 +1,164 @@
+#!/bin/bash
+#
+#  All rights reserved (c) 2014-2025 CEA/DAM.
+#
+#  This file is part of Phobos.
+#
+#  Phobos is free software: you can redistribute it and/or modify it under
+#  the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation, either version 2.1 of the Licence, or
+#  (at your option) any later version.
+#
+#  Phobos is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU Lesser General Public License for more details.
+#
+#  You should have received a copy of the GNU Lesser General Public License
+#  along with Phobos. If not, see <http://www.gnu.org/licenses/>.
+
+#
+# Integration test for phobos_hsm_sync_dir
+#
+
+test_dir=$(dirname $(readlink -e $0))
+. $test_dir/test_env.sh
+. $test_dir/setup_db.sh
+. $test_dir/test_launch_daemon.sh
+. $test_dir/utils_generation.sh
+
+set -xe
+
+function setup
+{
+    setup_tables
+
+    setup_test_dirs
+    setup_dummy_files 1 1k 1
+
+    export PHOBOS_LRS_families="dir"
+    export PHOBOS_STORE_default_family="dir"
+    export PHOBOS_HSM_synced_ctime_path="${DIR_TEST}/hsm_synced_ctime"
+    rm -f ${PHOBOS_HSM_synced_ctime_path}
+
+    invoke_lrs
+
+    dir_other_host="$DIR_TEST_IN/dir_other_host"
+    mkdir ${dir_other_host}
+    $phobos dir add --tags other_host ${dir_other_host}
+    $phobos dir format --unlock --fs posix --unlock ${dir_other_host}
+
+    dir1="$DIR_TEST_IN/dir1"
+    dir2="$DIR_TEST_IN/dir2"
+    mkdir ${dir1}
+    mkdir ${dir2}
+    $phobos dir add --tags this-host ${dir1} ${dir2}
+    $phobos dir format --fs posix --unlock ${dir1} ${dir2}
+}
+
+function cleanup
+{
+    waive_lrs
+
+    cleanup_dummy_files
+    cleanup_test_dirs
+
+    drop_tables
+}
+
+function check_hsm_sync_dir_opt()
+{
+    ($valg_phobos_hsm_sync_dir --bad_opt &&
+         error "--bad_opt parsing must fail") || true
+
+    local usage=$($valg_phobos_hsm_sync_dir -h)
+    local usage_long=$($valg_phobos_hsm_sync_dir --help)
+
+    if [[ "$usage" != "$usage_long" ]]; then
+        error "-h and --help must show the same usage"
+    fi
+
+    (echo ${usage} | grep usage) || error "-h must show usage"
+}
+
+function check_hsm_sync_dir()
+{
+    # object to sync
+    $phobos put --tags this-host ${FILES[0]} obj_to_sync
+
+    # object deprecated
+    $phobos put --tags this-host ${FILES[0]} obj_deprecated
+    $phobos delete obj_deprecated
+
+    # object already synced
+    $phobos put --tags this-host ${FILES[0]} obj_synced
+    $phobos copy create obj_synced sync
+
+    # object other copy
+    $phobos put --copy-name other ${FILES[0]} obj_other_copy
+
+    # object other host
+    $phobos put --tags other_host ${FILES[0]} obj_other_host
+    $PSQL << EOF
+UPDATE device SET host = 'other_host' WHERE path = '${dir_other_host}';
+EOF
+
+    # dry-run phobos_hsm_sync_dir
+    dry_run_log=$($valg_phobos_hsm_sync_dir -d source sync 2>&1)
+    (echo ${dry_run_log} | grep "Syncing" | grep "DRY" | grep obj_to_sync) ||
+        error "dry-run sync must show a sync of obj_t_sync"
+
+    # quiet dry-run phobos_hsm_sync_dir
+    quiet_dry_run_log=$($valg_phobos_hsm_sync_dir -q -d source sync 2>&1)
+    ((echo ${quiet_dry_run_log} | grep "Syncing" | grep obj_to_sync) &&
+        error "quiet dry-run sync must not show a sync of obj_to_sync") || true
+
+    # run phobos_hsm_sync_dir with no synced ctime file but a large delay
+    rm -f ${PHOBOS_HSM_synced_ctime_path}
+    export PHOBOS_HSM_sync_delay_second="36000"
+    no_synced_file_large_delay_log=$($valg_phobos_hsm_sync_dir source sync 2>&1)
+    ((echo ${no_synced_file_large_delay_log} | grep "Syncing") &&
+        error "no synced and a large delay must not show any sync") || true
+    unset PHOBOS_HSM_sync_delay_second
+
+    # run phobos_hsm_sync_dir with no synced ctime file
+    rm -f ${PHOBOS_HSM_synced_ctime_path}
+    $valg_phobos_hsm_sync_dir source sync
+
+    # check only one obj_to_sync is sync
+    sync_occurence=$($phobos copy list | grep -c sync)
+    if (( sync_occurence != 2 )); then
+        error "We must have two sync copies : obj_synced and obj_to_sync"
+    fi
+
+    # run phobos_hsm_sync_dir with no new file
+    no_new_object_log=$($valg_phobos_hsm_sync_dir source sync 2>&1)
+    ((echo ${no_new_object_log} | grep "Syncing") &&
+        error "sync without any new object must not show any sync") || true
+
+    # run phobos_hsm_sync_dir with a synced ctime file but a large delay
+    sleep 5
+    $phobos put --tags this-host ${FILES[0]} new_obj_to_sync
+    export PHOBOS_HSM_sync_delay_second="5"
+    synced_file_large_delay_log=$($valg_phobos_hsm_sync_dir source sync 2>&1)
+    ((echo ${synced_file_large_delay_log} | grep "Syncing") &&
+        error "synced and a large delay must not show any sync") || true
+    unset PHOBOS_HSM_sync_delay_second
+
+    # run phobos_hsm_sync_dir with a synced ctime file and a new object
+    new_object_log=$($valg_phobos_hsm_sync_dir source sync 2>&1)
+    (echo ${new_object_log} | grep "Syncing" | grep new_obj_to_sync) ||
+        error "sync must show a sync of new_obj_to_sync"
+
+    # run phobos_hsm_sync_dir with a synced ctime that exclude an old object
+    $phobos put --tags this-host ${FILES[0]} old_object
+    date +"%Y-%m-%d %H:%M:%S.%6N" > ${PHOBOS_HSM_synced_ctime_path}
+    old_object_log=$($valg_phobos_hsm_sync_dir source sync 2>&1)
+    ((echo ${old_object_log} | grep "Syncing") &&
+        error "sync without only an old object must not show any sync") || true
+}
+
+TESTS=(
+    "check_hsm_sync_dir_opt;"
+    "setup; check_hsm_sync_dir; cleanup"
+)

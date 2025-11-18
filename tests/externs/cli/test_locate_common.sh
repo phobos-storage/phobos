@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-#  All rights reserved (c) 2014-2022 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -29,6 +29,7 @@ medium_locker_bin="./medium_locker"
 . $test_dir/setup_db.sh
 . $test_dir/test_launch_daemon.sh
 . $test_dir/tape_drive.sh
+. $test_dir/utils_generation.sh
 
 function test_locate_cli
 {
@@ -229,6 +230,31 @@ function test_get_locate_cli
                 error "Error while restoring $family lock after locate"
         fi
     done
+}
+
+function test_locate_update_timestamp
+{
+    local obj=$(generate_prefix_id)
+
+    $phobos put /etc/hosts $obj || error "Error while putting $obj"
+    med=$($phobos extent list --output media_name $obj)
+    med=${med#\[\'}
+    med=${med%\'\]}
+    psql_cmd="SELECT last_locate FROM lock WHERE id = '${med}_legacy';"
+
+    $valg_phobos locate $obj
+    db_time1=$($PSQL -t -c "$psql_cmd")
+    db_time1=$(date -d "$db_time1" +%s)
+
+    sleep 1
+    $valg_phobos locate $obj
+
+    db_time2=$($PSQL -t -c "$psql_cmd")
+    db_time2=$(date -d "$db_time2" +%s)
+
+    if [ $db_time1 -ge $db_time2 ]; then
+        error "Invalid locate timestamp"
+    fi
 }
 
 function test_locate_locked_splits

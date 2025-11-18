@@ -44,7 +44,9 @@ check_SCRIPTS=acceptance.test \
               test_compatible_drive_exists.test \
               test_copy_create.test \
               test_copy_delete.test \
+              test_copy_grouping.test \
               test_copy_list.test \
+              test_ctime_ordered_read.test \
               test_delete.test \
               test_drive_list.test \
               test_drive_lookup.test \
@@ -58,6 +60,7 @@ check_SCRIPTS=acceptance.test \
               test_get.test \
               test_group_sync.sh \
               test_grouping.test \
+              test_hsm_sync_dir.test \
               test_import.test \
               test_ldm.sh \
               test_list_sort.test \
@@ -66,7 +69,7 @@ check_SCRIPTS=acceptance.test \
               test_logs.test \
               test_lost.test \
               test_lrs.test \
-              test_lrs_drive_status.sh \
+              test_lrs_drive_status.test \
               test_lrs_scheduling.test \
               test_media.test \
               test_media_delete.test \

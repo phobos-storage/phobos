@@ -318,4 +318,39 @@ int dss_get_living_and_deprecated_objects(struct dss_handle *handle,
                                           struct object_info **objs,
                                           int *n_objs);
 
+/**
+ * Check the lock can be taken, if does not exist or is an early lock,
+ * and take it.
+ *
+ * @param[in]  handle           DSS handle
+ * @param[in]  id               Resource identifier
+ * @param[in]  lock             Previous lock of the resource
+ * @param[in]  resource_type    Resource type (DSS side)
+ * @param[in]  resource         Resource, used for lock/unlock calls
+ * @param[in]  hostname         Current hostname of the process
+ * @param[in]  pid              Current PID of the process
+ *
+ * @return 0 or negative error code
+ */
+int dss_check_and_take_lock(struct dss_handle *handle,
+                            struct pho_id *id,
+                            struct pho_lock *lock,
+                            enum dss_type resource_type,
+                            void *resource,
+                            const char *hostname, int pid);
+
+/**
+ * Retrieve extents from DSS order by ctime.
+ *
+ * @param[in]   handle   DSS handle
+ * @param[in]   filter   Assembled DSS filtering criteria
+ * @param[out]  extents  List of retrieved extents
+ * @param[out]  count    Numver of extents in the list
+ *
+ * @return 0 or negative error code
+ */
+int dss_get_extents_order_by_ctime(struct dss_handle *handle,
+                                   const struct dss_filter *filter,
+                                   struct extent **extents, int *count);
+
 #endif
