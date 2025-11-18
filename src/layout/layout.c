@@ -283,16 +283,16 @@ int layout_copier(struct pho_data_processor *copier, struct pho_xfer_desc *xfer,
     copier->done = false;
     copier->xfer = xfer;
 
-    rc = build_layout_reader(copier, xfer, layout);
-    if (rc) {
-        layout_destroy(copier);
-        LOG_RETURN(rc, "unable to create reader part of a copier");
-    }
-
     rc = build_layout_writer(copier, xfer);
     if (rc) {
         layout_destroy(copier);
         LOG_RETURN(rc, "unable to create writer part of a copier");
+    }
+
+    rc = build_layout_reader(copier, xfer, layout);
+    if (rc) {
+        layout_destroy(copier);
+        LOG_RETURN(rc, "unable to create reader part of a copier");
     }
 
     return rc;
