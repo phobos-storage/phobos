@@ -27,12 +27,12 @@
 
 int get_extents_from_medium(struct admin_handle *adm,
                             const struct pho_id *source,
-                            struct extent **extents, int *count, bool orphan)
+                            struct extent **extents, int *count, bool no_orphan)
 {
     struct dss_filter filter;
     int rc;
 
-    if (orphan)
+    if (no_orphan)
         rc = dss_filter_build(&filter,
                               "{\"$AND\": ["
                               "  {\"DSS::EXT::medium_family\": \"%s\"},"

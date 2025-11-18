@@ -29,21 +29,21 @@
 #include "pho_types.h"
 
 /**
- * Retrieve the list of extents on a given medium. If \p repack is true, only
- * retrieve the orphan extents.
+ * Retrieve the list of extents on a given medium. If \p no_orphan is true, only
+ * retrieve non-orphan extents.
  *
  * @param[in]  adm          Admin handle
  * @param[in]  source       The id of the medium to use
  * @param[out] extents      The list of extents on that medium
  * @param[out] count        The size of the \p extents array
- * @param[in]  orphan       Whether we should only retrieve orphan extents or
- *                          not
+ * @param[in]  no_orphan    Whether we should only retrieve non-orphan extents
+ *                          or not
  *
  * @return 0 on success, negated errno on failure
  */
 int get_extents_from_medium(struct admin_handle *adm,
                             const struct pho_id *source,
                             struct extent **extents, int *count,
-                            bool orphan);
+                            bool no_orphan);
 
 #endif
