@@ -989,6 +989,9 @@ int raid_reader_processor_step(struct pho_data_processor *proc,
             goto release;
     }
 
+    if (proc->xfer->xd_targets[proc->current_target].xt_rc != 0)
+        GOTO(release, rc = proc->xfer->xd_targets[proc->current_target].xt_rc);
+
     /* read */
     if (!proc->buff.size)
         return 0;
@@ -1001,6 +1004,9 @@ int raid_reader_processor_step(struct pho_data_processor *proc,
                   io_context->current_split_size;
     if (split_ended)
         rc = raid_reader_split_fini(proc);
+
+    if (rc && !proc->xfer->xd_targets[proc->current_target].xt_rc)
+        proc->xfer->xd_targets[proc->current_target].xt_rc = rc;
 
 release:
     need_release = rc || split_ended;
@@ -1469,6 +1475,10 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
         if (rc)
             goto check_for_release;
     }
+
+    if (proc->xfer->xd_targets[proc->current_target].xt_rc != 0)
+        GOTO(check_for_release,
+             rc = proc->xfer->xd_targets[proc->current_target].xt_rc);
 
     /* write */
     if (!proc->buff.size) {
