@@ -751,12 +751,13 @@ static void io_sched_one_request(void **data)
     };
     struct media_info media[2];
     struct req_container reqc;
-    struct lrs_dev dev;
+    struct lrs_dev devs[2];
     int rc;
 
     io_sched->global_device_list = devices;
-    create_device(&dev, "test", LTO5_MODEL, NULL);
-    gptr_array_from_list(devices, &dev, 1, sizeof(dev));
+    create_device(&devs[0], "test1", LTO5_MODEL, NULL);
+    create_device(&devs[1], "test2", LTO5_MODEL, NULL);
+    gptr_array_from_list(devices, devs, 2, sizeof(devs[0]));
     wrap_create_medium(&media[0], media_names[0]);
     wrap_create_medium(&media[1], media_names[1]);
     add_media(media, 2);
@@ -780,8 +781,12 @@ static void io_sched_one_request(void **data)
     rc = io_sched_remove_request(io_sched, &reqc);
     assert_return_code(rc, -rc);
 
-    rc = io_sched_remove_device(io_sched, &dev);
-    cleanup_device(&dev);
+    rc = io_sched_remove_device(io_sched, &devs[0]);
+    cleanup_device(&devs[0]);
+    assert_return_code(rc, -rc);
+
+    rc = io_sched_remove_device(io_sched, &devs[1]);
+    cleanup_device(&devs[1]);
     assert_return_code(rc, -rc);
 
     remove_media(media, 2);
@@ -855,7 +860,7 @@ static void io_sched_one_medium_no_device_available(void **data)
     struct req_container *new_reqc;
     struct media_info media[3];
     struct req_container reqc;
-    struct lrs_dev devices[2];
+    struct lrs_dev devices[3];
     struct lrs_dev *dev;
     size_t index;
     int rc;
@@ -864,6 +869,7 @@ static void io_sched_one_medium_no_device_available(void **data)
     io_sched->global_device_list = device_array;
     create_device(&devices[0], "D1", LTO5_MODEL, NULL);
     create_device(&devices[1], "D2", LTO5_MODEL, NULL);
+    create_device(&devices[2], "D3", LTO5_MODEL, NULL);
 
     for (i = 0; i < 3; i++)
         wrap_create_medium(&media[i], media_names[i]);
@@ -872,7 +878,8 @@ static void io_sched_one_medium_no_device_available(void **data)
     create_request(&reqc, media_names, 3, 2, io_sched->lock_handle);
     mount_medium(&devices[0], &media[0]);
     mount_medium(&devices[1], &media[1]);
-    gptr_array_from_list(device_array, &devices, 2, sizeof(devices[0]));
+    mount_medium(&devices[2], &media[2]);
+    gptr_array_from_list(device_array, &devices, 3, sizeof(devices[0]));
 
     rc = io_sched_push_request(io_sched, &reqc);
     assert_return_code(rc, -rc);
@@ -887,6 +894,7 @@ static void io_sched_one_medium_no_device_available(void **data)
     /* device already used */
     devices[0].ld_ongoing_io = true;
     devices[1].ld_ongoing_io = true;
+    devices[2].ld_ongoing_io = true;
 
     index = 0;
     rc = io_sched_get_device_medium_pair(io_sched, &reqc, &dev, &index);
@@ -903,6 +911,10 @@ static void io_sched_one_medium_no_device_available(void **data)
 
     rc = io_sched_remove_device(io_sched, &devices[1]);
     cleanup_device(&devices[1]);
+    assert_return_code(rc, -rc);
+
+    rc = io_sched_remove_device(io_sched, &devices[2]);
+    cleanup_device(&devices[2]);
     assert_return_code(rc, -rc);
 
     remove_media(media, 3);
@@ -1016,7 +1028,7 @@ static void io_sched_4_medium(void **data)
     assert_true(index < 4);
     assert_false(index_seen[index]);
     index_seen[index] = true;
-    assert_ptr_equal(dev, &devices[0]);
+    assert_ptr_equal(dev, &devices[index]);
     dev->ld_ongoing_scheduled = true;
 
     if (IO_REQ_TYPE == IO_REQ_FORMAT)
@@ -1029,7 +1041,7 @@ static void io_sched_4_medium(void **data)
     assert_true(index < 4);
     assert_false(index_seen[index]);
     index_seen[index] = true;
-    assert_ptr_equal(dev, &devices[1]);
+    assert_ptr_equal(dev, &devices[index]);
     dev->ld_ongoing_scheduled = true;
 
     if (IO_REQ_TYPE == IO_REQ_READ)
@@ -1042,7 +1054,7 @@ static void io_sched_4_medium(void **data)
     assert_true(index < 4);
     assert_false(index_seen[index]);
     index_seen[index] = true;
-    assert_ptr_equal(dev, &devices[2]);
+    assert_ptr_equal(dev, &devices[index]);
     dev->ld_ongoing_scheduled = true;
 
     index = 3;
@@ -1052,7 +1064,7 @@ static void io_sched_4_medium(void **data)
     assert_true(index < 4);
     assert_false(index_seen[index]);
     index_seen[index] = true;
-    assert_ptr_equal(dev, &devices[3]);
+    assert_ptr_equal(dev, &devices[index]);
     dev->ld_ongoing_scheduled = true;
 
     index = 1;
@@ -2273,13 +2285,20 @@ int main(void)
                                           io_sched_setup,
                                           io_sched_teardown);
 
-    check_rc(set_schedulers("grouped_read", "fifo", "fifo", "none"));
+    check_rc(set_schedulers("grouped_read", "grouped_write", "fifo", "none"));
     check_rc(set_fair_share_minmax("LTO5", "0,0,0", "100,100,100"));
     check_rc(set_fair_share_minmax("LTO6", "0,0,0", "100,100,100"));
     check_rc(set_fair_share_minmax("LTO7", "0,0,0", "100,100,100"));
 
     pho_info("Starting I/O scheduler test for READ requests with "
              "'grouped_read' scheduler");
+    error_count += cmocka_run_group_tests(test_io_sched_api,
+                                          io_sched_setup,
+                                          io_sched_teardown);
+
+    pho_info("Starting I/O scheduler test for WRITE requests with "
+             "'grouped_write' scheduler");
+    IO_REQ_TYPE = IO_REQ_WRITE;
     error_count += cmocka_run_group_tests(test_io_sched_api,
                                           io_sched_setup,
                                           io_sched_teardown);

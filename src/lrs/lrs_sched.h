@@ -431,4 +431,9 @@ int fetch_and_check_medium_info(struct lock_handle *lock_handle,
                                 size_t index,
                                 struct media_info **target_medium);
 
+bool medium_is_write_compatible(struct media_info *medium,
+                                const char *grouping,
+                                const struct string_array *required_tags,
+                                bool empty_medium);
+
 #endif

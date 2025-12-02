@@ -106,6 +106,7 @@ void create_device(struct lrs_dev *dev, char *path, char *model,
     dev->ld_dss_media_info = NULL;
     dev->ld_device_thread.state = THREAD_RUNNING;
     dev->ld_sys_dev_state.lds_family = PHO_RSC_TAPE;
+    pthread_mutex_init(&dev->ld_mutex, NULL);
 
     dev->ld_sys_dev_state.lds_model = NULL;
     dev->ld_sys_dev_state.lds_serial = NULL;

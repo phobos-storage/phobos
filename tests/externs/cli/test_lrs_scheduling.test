@@ -26,6 +26,8 @@ test_dir=$(dirname $(readlink -e $0))
 . $test_dir/utils.sh
 . $test_dir/utils_generation.sh
 
+phobosd_client="$test_dir/utils/.libs/phobosd-client"
+
 function setup()
 {
     export PHOBOS_LRS_lock_file="$test_dir/phobosd.lock"
@@ -131,9 +133,168 @@ function test_fair_share_conf_at_startup()
     drop_tables
 }
 
+function setup_phobosd_client()
+{
+    setup_test_dirs
+
+    DIRS=(
+        "$DIR_TEST_OUT/dir1"
+        "$DIR_TEST_OUT/dir2"
+        "$DIR_TEST_OUT/dir3"
+        "$DIR_TEST_OUT/dir4"
+    )
+
+    setup_tables
+    export PHOBOS_LRS_sync_nb_req="tape=1,dir=1,rados_pool=1"
+    # 10s to make sure the sync don't happen due to timeouts
+    export PHOBOS_LRS_sync_time_ms="tape=10000,dir=10000,rados_pool=10000"
+    invoke_lrs
+
+    for dir in "${DIRS[@]}"; do
+        mkdir "$dir"
+        $phobos dir add -T "common,$dir" "$dir"
+        $phobos dir format "$dir"
+    done
+}
+
+function cleanup_phobosd_client()
+{
+    waive_lrs
+    drop_tables
+    rm -rf "$DIR_TEST"
+}
+
+function test_phobosd_client()
+{
+    waive_lrs
+    export PHOBOS_IO_SCHED_DIR_read_algo="fifo"
+    export PHOBOS_IO_SCHED_DIR_write_algo="fifo"
+    invoke_lrs
+
+    $phobos dir unlock "${DIRS[0]}" "${DIRS[1]}"
+
+    $phobosd_client -vvv --exit-on-error --stdin << EOF
+write 1
+recv 1 write_alloc
+release 1
+recv 2 write_release
+
+read 1 ${DIRS[0]} ${DIRS[1]}
+recv 3 read_alloc
+release 3
+
+batch 2 write 1
+recv 5 write_alloc
+recv 6 write_alloc
+
+release 5
+recv 7 write_release
+
+release 6
+recv 8 write_release
+quit
+EOF
+    $phobos dir lock "${DIRS[@]}"
+}
+
+function test_fifo_parallel_write()
+{
+    waive_lrs
+    export PHOBOS_LRS_sync_nb_req="tape=1,dir=1,rados_pool=1"
+    export PHOBOS_IO_SCHED_DIR_write_algo="fifo"
+    invoke_lrs
+
+    $phobos dir unlock "${DIRS[@]}"
+
+    $phobosd_client -vvv --exit-on-error --stdin << EOF
+batch 6 write 1
+batch 4 recv write_alloc
+inflight -w 2
+
+release -n 1
+recv write_release
+recv write_alloc
+
+inflight -w 1
+release -n 1
+recv write_release
+recv write_alloc
+
+inflight -w 0
+release
+batch 4 recv write_release
+quit
+EOF
+    $phobos dir lock "${DIRS[@]}"
+}
+
+function test_buffered_sync()
+{
+    waive_lrs
+    export PHOBOS_LRS_sync_nb_req="tape=1,dir=2,rados_pool=1"
+    invoke_lrs
+
+    $phobos dir unlock "${DIRS[0]}"
+    $phobosd_client -vvv --exit-on-error --stdin << EOF
+write 1
+recv 1 write_alloc
+
+write 1
+release 1
+
+recv 2 write_alloc
+inflight -R 1
+
+release 2
+recv write_release
+recv write_release
+quit
+EOF
+    $phobos dir lock "${DIRS[0]}"
+}
+
+function test_grouped_write_dir()
+{
+    waive_lrs
+    export PHOBOS_IO_SCHED_DIR_write_algo="grouped_write"
+    export PHOBOS_LRS_sync_nb_req="tape=1,dir=4,rados_pool=1"
+    invoke_lrs
+
+    $phobos dir unlock "${DIRS[@]}"
+
+    $phobosd_client -vvv --exit-on-error --stdin << EOF
+batch 4 write 1 -t common
+
+recv write_alloc
+inflight -w 3
+
+release
+recv write_alloc
+inflight -w 2
+
+release
+recv write_alloc
+inflight -w 1
+
+release
+recv write_alloc
+inflight -w 0
+
+release
+batch 4 recv write_release
+quit
+EOF
+
+    $phobos dir lock "${DIRS[0]}"
+}
+
 TESTS=(
     "test_fair_share_conf_at_startup"
     "setup; test_sync_after_put_get; test_conf_set; cleanup"
+    "setup_phobosd_client; \
+        test_phobosd_client; \
+        test_buffered_sync; \
+        test_fifo_parallel_write; \
+        test_grouped_write_dir; \
+     cleanup_phobosd_client"
 )
-
-
