@@ -443,8 +443,24 @@ static int processor_communicate(struct pho_data_processor *proc,
             rc = proc->writer_ops->step(proc, NULL, &requests, &n_reqs);
             if (rc || n_reqs) {
                 /* no more io needed after a completed write step */
-                return send_generated_requests(proc, comm, enc_id, requests,
-                                               n_reqs, rc);
+                int rc2 = send_generated_requests(proc, comm, enc_id, requests,
+                                                  n_reqs, rc);
+                if (rc == 0 && rc2 != 0)
+                    LOG_RETURN(rc2, "failed to send requests to phobosd");
+
+                if (!rc)
+                    return 0;
+
+                /* writer's step function failed, call reader's step one last
+                 * time in case something needs to be released.
+                 */
+                n_reqs = 0;
+                rc2 = proc->reader_ops->step(proc, NULL, &requests, &n_reqs);
+                if (n_reqs)
+                    return send_generated_requests(proc, comm, enc_id,
+                                                   requests, n_reqs, rc);
+
+                return rc2;
             }
         }
     }
