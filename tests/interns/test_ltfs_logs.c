@@ -88,7 +88,7 @@ static void cleanup_tests(struct dss_and_tlc_lib *handle,
     rc = dss_logs_delete(&handle->dss, NULL);
     assert_return_code(rc, -rc);
     cleanup_device(device);
-    pho_context_reset_mock_ltfs_functions();
+    pho_context_reset_mock_functions();
     rc = dss_media_delete(&handle->dss, medium, 1);
     assert_return_code(rc, -rc);
     lrs_medium_release(medium);
@@ -214,7 +214,7 @@ static void ltfs_mount_mkdir_failure(void **state)
 
     medium = prepare_mount(dss_and_tlc_lib, &device);
 
-    context->mock_ltfs.mock_mkdir = fail_mkdir;
+    context->mocks.mock_ltfs.mock_mkdir = fail_mkdir;
 
     rc = dev_mount(&device);
     assert_int_equal(rc, -EPERM);
@@ -254,7 +254,7 @@ static void ltfs_mount_command_call_failure(void **state)
 
     medium = prepare_mount(dss_and_tlc_lib, &device);
 
-    context->mock_ltfs.mock_command_call = fail_command_call;
+    context->mocks.mock_ltfs.mock_command_call = fail_command_call;
 
     rc = dev_mount(&device);
     assert_int_equal(rc, -2);
@@ -352,12 +352,12 @@ static void ltfs_mount_get_label_failure(void **state)
     setenv("PHOBOS_LTFS_cmd_mount",
            "../../scripts/pho_ldm_helper mount_ltfs \"%s\" \"%s\"", 0);
 
-    context->mock_ltfs.mock_getxattr = fail_getxattr;
+    context->mocks.mock_ltfs.mock_getxattr = fail_getxattr;
 
     rc = dev_mount(&device);
     assert_int_equal(rc, -EISCONN);
 
-    pho_context_reset_mock_ltfs_functions();
+    pho_context_reset_mock_functions();
 
     rc = get_fs_adapter(PHO_FS_LTFS, &fsa);
     assert_return_code(-rc, rc);
@@ -398,7 +398,7 @@ static void ltfs_umount_command_call_failure(void **state)
     rc = dev_mount(&device);
     assert_return_code(rc, -rc);
 
-    context->mock_ltfs.mock_command_call = fail_command_call;
+    context->mocks.mock_ltfs.mock_command_call = fail_command_call;
 
     rc = dev_umount(&device);
     assert_int_equal(rc, -2);
@@ -414,7 +414,7 @@ static void ltfs_umount_command_call_failure(void **state)
 
     free(cmd);
     free(mount_path);
-    pho_context_reset_mock_ltfs_functions();
+    pho_context_reset_mock_functions();
     dev_umount(&device);
     cleanup_tests(dss_and_tlc_lib, &device, medium);
 }
@@ -435,7 +435,7 @@ static void ltfs_format_command_call_failure(void **state)
 
     medium = create_and_load(dss_and_tlc_lib, &device);
 
-    context->mock_ltfs.mock_command_call = fail_command_call;
+    context->mocks.mock_ltfs.mock_command_call = fail_command_call;
 
     rc = dev_format(&device, fsa, false);
     assert_int_equal(rc, -2);
@@ -476,7 +476,7 @@ static void ltfs_df_statfs_failure(void **state)
     rc = dev_mount(&device);
     assert_return_code(rc, -rc);
 
-    context->mock_ltfs.mock_statfs = fail_statfs;
+    context->mocks.mock_ltfs.mock_statfs = fail_statfs;
 
     result = dev_mount_is_writable(&device);
     assert_false(result);
@@ -518,9 +518,9 @@ static void ltfs_sync_setxattr_failure(void **state)
 
     medium = create_and_load(dss_and_tlc_lib, &device);
 
-    context->mock_ltfs.mock_setxattr = fail_setxattr;
+    context->mocks.mock_ltfs.mock_setxattr = fail_setxattr;
     rc = medium_sync(&device);
-    pho_context_reset_mock_ltfs_functions();
+    pho_context_reset_mock_functions();
 
     assert_int_equal(rc, -4);
 

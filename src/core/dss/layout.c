@@ -192,9 +192,17 @@ static int layout_delete_query(void *void_layout, int item_cnt,
         g_string_append_printf(request,
                                "DELETE FROM layout"
                                " WHERE object_uuid = '%s'"
-                               "  AND version = '%d' AND copy_name = '%s';",
+                               "  AND version = '%d' AND copy_name = '%s'%s",
                                layout->uuid, layout->version,
-                               layout->copy_name);
+                               layout->copy_name,
+                               layout->ext_count ? " AND (" : "");
+
+        for (int j = 0; j < layout->ext_count; j++)
+            g_string_append_printf(request, "extent_uuid = '%s'%s",
+                                   layout->extents[j].uuid,
+                                   j + 1 < layout->ext_count ? " OR " : "");
+
+        g_string_append_printf(request, "%s;", layout->ext_count ? ")" : "");
     }
 
     return 0;
@@ -299,6 +307,7 @@ static int layout_from_pg_row(struct dss_handle *handle, void *void_layout,
     }
 
 out:
+    json_decref(root);
     layout->ext_count = count;
     layout->extents = extents;
 
@@ -311,6 +320,8 @@ static void layout_result_free(void *void_layout)
 
     if (!layout)
         return;
+
+    layout_info_free_extents(void_layout);
 
     /* Undo dss_layout_desc_decode */
     free(layout->layout_desc.mod_name);

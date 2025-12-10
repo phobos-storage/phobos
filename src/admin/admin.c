@@ -48,6 +48,8 @@
 #include "pho_type_utils.h"
 
 #include "import.h"
+#include "lost.h"
+#include "utils.h"
 
 enum pho_cfg_params_admin {
     /* Actual admin parameters */
@@ -1203,46 +1205,6 @@ int phobos_admin_format(struct admin_handle *adm, const struct pho_id *ids,
     return rc;
 }
 
-static int _get_extents(struct admin_handle *adm,
-                        const struct pho_id *source,
-                        struct extent **extents, int *count, bool repack)
-{
-    struct dss_filter filter;
-    int rc;
-
-    if (repack)
-        rc = dss_filter_build(&filter,
-                              "{\"$AND\": ["
-                              "  {\"DSS::EXT::medium_family\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_id\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_library\": \"%s\"},"
-                              "  {\"$NOR\": [{\"DSS::EXT::state\": \"%s\"}]}"
-                              "]}", rsc_family2str(source->family),
-                              source->name, source->library,
-                              extent_state2str(PHO_EXT_ST_ORPHAN));
-    else
-        rc = dss_filter_build(&filter,
-                              "{\"$AND\": ["
-                              "  {\"DSS::EXT::medium_family\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_id\": \"%s\"},"
-                              "  {\"DSS::EXT::medium_library\": \"%s\"}"
-                              "]}", rsc_family2str(source->family),
-                              source->name, source->library);
-    if (rc)
-        LOG_RETURN(rc, "Failed to build filter for extent retrieval");
-
-    rc = dss_extent_get(&adm->dss, &filter, extents, count);
-    dss_filter_free(&filter);
-    if (rc)
-        LOG_RETURN(rc,
-                   "Failed to retrieve (family '%s', name '%s', library '%s') "
-                   "extents",
-                   rsc_family2str(source->family), source->name,
-                   source->library);
-
-    return rc;
-}
-
 static ssize_t _sum_extent_size(struct extent *extents, int count)
 {
     ssize_t total_size = 0;
@@ -1444,7 +1406,7 @@ static int _clean_database_following_format(struct admin_handle *adm,
     if (rc)
         LOG_RETURN(rc, "Failed to build orphan extents retrieval filter");
 
-    rc = dss_extent_get(&adm->dss, &filter, &extents, &count);
+    rc = dss_extent_get(&adm->dss, &filter, &extents, &count, NULL);
     dss_filter_free(&filter);
     if (rc)
         LOG_GOTO(free_ext, rc,
@@ -1463,9 +1425,10 @@ free_ext:
     return rc;
 }
 
-static int _retrieve_fstype_from_medium(struct admin_handle *adm,
-                                        const struct pho_id *medium,
-                                        enum fs_type *fstype)
+static int _retrieve_source_info(struct admin_handle *adm,
+                                 const struct pho_id *medium,
+                                 struct string_array *tags,
+                                 enum fs_type *fs_type)
 {
     struct dss_filter filter;
     struct media_info *media;
@@ -1486,16 +1449,18 @@ static int _retrieve_fstype_from_medium(struct admin_handle *adm,
     dss_filter_free(&filter);
     if (rc)
         LOG_RETURN(rc,
-                   "Failed to retrieve medium (family '%s', name '%s', library "
-                   "'%s') info from DSS", rsc_family2str(medium->family),
-                   medium->name, medium->library);
+                   "Failed to retrieve medium "FMT_PHO_ID" info from DSS",
+                   PHO_ID(*medium));
 
     if (count != 1) {
         dss_res_free(media, count);
         LOG_RETURN(-EINVAL, "Did not retrieve one medium, %d instead", count);
     }
 
-    *fstype = media->fs.type;
+    string_array_dup(tags, &media->tags);
+    if (fs_type)
+        *fs_type = media->fs.type;
+
     dss_res_free(media, count);
 
     return 0;
@@ -1507,10 +1472,13 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     enum fs_type source_fs_type = PHO_FS_INVAL;
     struct pho_io_descr iod_source = {0};
     struct pho_io_descr iod_target = {0};
+    struct string_array empty_tags = {0};
     struct pho_ext_loc loc_source = {0};
     struct pho_ext_loc loc_target = {0};
     struct io_adapter_module *ioa = {0};
+    struct string_array *ptr_tags;
     struct extent *ext_res = NULL;
+    struct string_array src_tags;
     GArray *new_ext_uuids = NULL;
     int ext_cnt_done = 0;
     struct pho_id target;
@@ -1528,30 +1496,49 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
         return rc;
 
     /* Determine total size of live objects */
-    rc = _get_extents(adm, source, &ext_res, &ext_cnt, true);
+    rc = get_extents_from_medium(adm, source, &ext_res, &ext_cnt, true);
     if (rc)
         return rc;
+
+    rc = _retrieve_source_info(adm, source, &src_tags,
+                               source_fs_type == PHO_FS_INVAL ?
+                                  &source_fs_type : NULL);
+    if (rc)
+        LOG_GOTO(free_ext, rc,
+                 "Failed to retrieve info for "FMT_PHO_ID, PHO_ID(*source));
 
     total_size = _sum_extent_size(ext_res, ext_cnt);
     if (total_size == 0)
         goto format;
 
-    new_ext_uuids = g_array_new(FALSE, TRUE, sizeof(ext_res[0].uuid));
-
     /* Prepare read allocation */
     rc = _get_source_medium(adm, source, &loc_source, &iod_source, &ioa,
                             &source_fs_type);
     if (rc)
-        goto free_ext;
+        goto free_tags;
 
-    /* Prepare write allocation */
-    rc = _get_target_medium(adm, source, total_size, tags, &loc_target,
+    /* Prepare write allocation
+     * Use the same tags as the source medium
+     */
+    if (tags->count == 0)
+        ptr_tags = &src_tags;
+    /* Use no tags */
+    else if (tags->count == 1 && strcmp(tags->strings[0], "") == 0)
+        ptr_tags = &empty_tags;
+    /* Use the tags specified */
+    else
+        ptr_tags = tags;
+
+    rc = _get_target_medium(adm, source, total_size, ptr_tags, &loc_target,
                             &iod_target, &target);
     if (rc) {
         free(loc_source.root_path);
+
         _send_and_recv_release(adm, source, &iod_source, 3, NULL, NULL, 0, 0);
-        goto free_ext;
+        goto free_tags;
     }
+
+    new_ext_uuids = g_array_new(FALSE, TRUE, sizeof(ext_res[0].uuid));
 
     /* Copy loop */
     for (i = 0; i < ext_cnt; ++i, ++ext_cnt_done) {
@@ -1566,7 +1553,7 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
             break;
         }
 
-        rc = dss_extent_insert(&adm->dss, &ext_new, 1);
+        rc = dss_extent_insert(&adm->dss, &ext_new, 1, DSS_SET_INSERT);
         if (rc) {
             pho_error(rc, "Failed to add extent '%s' information in DSS",
                       ext_res[i].uuid);
@@ -1606,20 +1593,10 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     new_ext_uuids = NULL;
 
 format:
-    if (source_fs_type == PHO_FS_INVAL) {
-        rc = _retrieve_fstype_from_medium(adm, source, &source_fs_type);
-        if (rc)
-            LOG_GOTO(free_ext, rc,
-                     "Failed to retrieve FS type for (family '%s', name '%s', "
-                     "library '%s')", rsc_family2str(source->family),
-                     source->name, source->library);
-    }
-
     rc = phobos_admin_format(adm, source, 1, 1, source_fs_type, true, true);
     if (rc)
         LOG_GOTO(free_ext, rc,
-                 "Failed to format (family '%s', name '%s', library '%s')",
-                 rsc_family2str(source->family), source->name, source->library);
+                 "Failed to format "FMT_PHO_ID, PHO_ID(*source));
 
     rc = _clean_database_following_format(adm, source);
 
@@ -1634,6 +1611,9 @@ free_ext:
             pho_error(rc, "Failed to update state of new extents to orphan");
 
     }
+
+free_tags:
+    string_array_free(&src_tags);
     dss_res_free(ext_res, ext_cnt);
 
     return rc;
@@ -1686,50 +1666,59 @@ int phobos_admin_ping_tlc(const char *library, bool *library_is_up)
 }
 
 /**
- * Construct the medium string for the extent list filter.
- *
- * The caller must ensure medium_str is initialized before calling.
- *
- * \param[in,out]   medium_str      Empty medium string.
- * \param[in]       medium          Medium filter.
- */
-static void phobos_construct_medium(GString *medium_str, const char *medium)
-{
-    /**
-     * We prefered putting this line in a separate function to ease a
-     * possible future change that would allow for multiple medium selection.
-     */
-    g_string_append_printf(medium_str, "{\"DSS::EXT::medium_id\": \"%s\"}",
-                           medium);
-}
-
-static void phobos_construct_library(GString *library_str, const char *library)
-{
-    g_string_append_printf(library_str,
-                           "{\"DSS::EXT::medium_library\": \"%s\"}", library);
-}
-
-static void phobos_construct_library_medium(GString *lib_med_str,
-                                            const char *medium,
-                                            const char *library)
-{
-    g_string_append_printf(lib_med_str,
-                           "{\"$AND\": [{\"DSS::EXT::medium_id\": \"%s\"}, "
-                           "{\"DSS::EXT::medium_library\": \"%s\"}]}",
-                           medium, library);
-}
-/**
  * Construct the extent string for the extent list filter.
  *
  * The caller must ensure extent_str is initialized before calling.
  *
  * \param[in,out]   extent_str      Empty extent string.
+ * \param[in]       medium          Medium filter.
+ * \param[in]       library         Library filter.
+ * \param[in]       orphan          Orphan state filter.
+ */
+static void phobos_construct_extent(GString *extent_str, const char *medium,
+                                    const char *library, bool orphan)
+{
+    int count = 0;
+
+    count += (medium != NULL ? 1 : 0);
+    count += (library != NULL ? 1 : 0);
+    count += (orphan ? 1 : 0);
+
+    if (count == 0)
+        return;
+
+    g_string_append_printf(extent_str, "{\"$AND\":[");
+
+    if (medium)
+        g_string_append_printf(extent_str,
+                               "{\"DSS::EXT::medium_id\": \"%s\"}%s",
+                                medium, --count != 0 ? "," : "");
+
+    if (library)
+        g_string_append_printf(extent_str,
+                               "{\"DSS::EXT::medium_library\": \"%s\"}%s",
+                               library, --count != 0 ? "," : "");
+
+    if (orphan)
+        g_string_append_printf(extent_str,
+                               "{\"DSS::EXT::state\": \"%s\"}",
+                               extent_state2str(PHO_EXT_ST_ORPHAN));
+
+    g_string_append_printf(extent_str, "]}");
+}
+
+/**
+ * Construct the object string for the extent list filter.
+ *
+ * The caller must ensure obj_str is initialized before calling.
+ *
+ * \param[in,out]   obj_str         Empty object string.
  * \param[in]       res             Ressource filter.
  * \param[in]       n_res           Number of requested resources.
  * \param[in]       is_pattern      True if search done using POSIX pattern.
  * \param[in]       copy_name       Copy name filter.
  */
-static void phobos_construct_extent(GString *extent_str, const char **res,
+static void phobos_construct_object(GString *obj_str, const char **res,
                                     int n_res, bool is_pattern,
                                     const char *copy_name)
 {
@@ -1737,78 +1726,76 @@ static void phobos_construct_extent(GString *extent_str, const char **res,
     char *res_suffix = (is_pattern ? "}" : "");
     int i;
 
-    if (copy_name) {
-        g_string_append_printf(extent_str, "{\"$AND\" : [");
-        g_string_append_printf(extent_str,
-                               "{\"DSS::COPY::copy_name\":\"%s\"}%s",
-                               copy_name, n_res ? "," : "");
-    }
-
-    if (n_res > 1)
-        g_string_append_printf(extent_str, "{\"$OR\" : [");
-
-    for (i = 0; i < n_res; ++i)
-        g_string_append_printf(extent_str,
-                               "%s {\"DSS::OBJ::oid\":\"%s\"}%s %s",
-                               res_prefix,
-                               res[i],
-                               res_suffix,
-                               (i + 1 != n_res) ? "," : "");
-
-    if (n_res > 1)
-        g_string_append_printf(extent_str, "]}");
+    g_string_append_printf(obj_str, "{\"$AND\" : [");
 
     if (copy_name)
-        g_string_append_printf(extent_str, "]}");
+        g_string_append_printf(obj_str,
+                               "{\"DSS::COPY::copy_name\":\"%s\"}%s",
+                               copy_name, n_res ? "," : "");
+
+    if (n_res) {
+        g_string_append_printf(obj_str, "{\"$OR\" : [");
+
+        for (i = 0; i < n_res; ++i)
+            g_string_append_printf(obj_str,
+                                   "%s {\"DSS::OBJ::oid\":\"%s\"}%s %s",
+                                   res_prefix,
+                                   res[i],
+                                   res_suffix,
+                                   (i + 1 != n_res) ? "," : "");
+
+        g_string_append_printf(obj_str, "]}");
+    }
+
+    g_string_append_printf(obj_str, "]}");
 }
 
 int phobos_admin_layout_list(struct admin_handle *adm, const char **res,
                              int n_res, bool is_pattern, const char *medium,
                              const char *library, const char *copy_name,
-                             struct layout_info **layouts,
+                             bool orphan, struct layout_info **layouts,
                              int *n_layouts, struct dss_sort *sort)
 {
-    struct dss_filter *lib_med_filter_ptr = NULL;
-    struct dss_filter *ext_filter_ptr = NULL;
-    struct dss_filter lib_med_filter;
-    struct dss_filter ext_filter;
+    struct dss_filter *extent_filter_ptr = NULL;
+    struct dss_filter *obj_filter_ptr = NULL;
+    struct dss_filter extent_filter;
+    struct dss_filter obj_filter;
     bool library_is_valid;
     bool medium_is_valid;
-    GString *lib_med_str;
+    bool copy_is_valid;
     GString *extent_str;
+    GString *obj_str;
     int rc = 0;
 
-    lib_med_str = g_string_new(NULL);
     extent_str = g_string_new(NULL);
+    obj_str = g_string_new(NULL);
+
     medium_is_valid = (medium && strcmp(medium, ""));
     library_is_valid = (library && strcmp(library, ""));
 
-    if (medium_is_valid && !library_is_valid)
-        phobos_construct_medium(lib_med_str, medium);
-    else if (library_is_valid && !medium_is_valid)
-        phobos_construct_library(lib_med_str, library);
-    else if (library_is_valid && medium_is_valid)
-        phobos_construct_library_medium(lib_med_str, medium, library);
+    if (medium_is_valid || library_is_valid || orphan) {
+        phobos_construct_extent(extent_str, medium, library, orphan);
 
-    if (lib_med_str->len > 0) {
-        rc = dss_filter_build(&lib_med_filter, "%s", lib_med_str->str);
+        rc = dss_filter_build(&extent_filter, "%s", extent_str->str);
         if (rc)
             goto release_extent;
 
-        lib_med_filter_ptr = &lib_med_filter;
+        extent_filter_ptr = &extent_filter;
     }
 
     /**
      * If there are at least one resource, we construct a string containing
      * each request.
      */
-    if (n_res || copy_name) {
-        phobos_construct_extent(extent_str, res, n_res, is_pattern, copy_name);
-        rc = dss_filter_build(&ext_filter, "%s", extent_str->str);
+    copy_is_valid = (copy_name && strcmp(copy_name, ""));
+
+    if (n_res || copy_is_valid) {
+        phobos_construct_object(obj_str, res, n_res, is_pattern, copy_name);
+        rc = dss_filter_build(&obj_filter, "%s", obj_str->str);
         if (rc)
             goto release_extent;
 
-        ext_filter_ptr = &ext_filter;
+        obj_filter_ptr = &obj_filter;
     }
 
     /**
@@ -1816,17 +1803,17 @@ int phobos_admin_layout_list(struct admin_handle *adm, const char **res,
      * necessary, thus passing them as NULL to dss_full_layout_get ensures
      * the expected behaviour.
      */
-    rc = dss_full_layout_get(&adm->dss, ext_filter_ptr, lib_med_filter_ptr,
+    rc = dss_full_layout_get(&adm->dss, obj_filter_ptr, extent_filter_ptr,
                              layouts, n_layouts, sort);
     if (rc)
         pho_error(rc, "Cannot fetch layouts");
 
 release_extent:
-    g_string_free(lib_med_str, TRUE);
+    g_string_free(obj_str, TRUE);
     g_string_free(extent_str, TRUE);
 
-    dss_filter_free(lib_med_filter_ptr);
-    dss_filter_free(ext_filter_ptr);
+    dss_filter_free(extent_filter_ptr);
+    dss_filter_free(obj_filter_ptr);
 
     return rc;
 }
@@ -1944,7 +1931,7 @@ int phobos_admin_media_add(struct admin_handle *adm, struct media_info *med_ls,
 }
 
 int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
-                              int num_med, int *num_removed_med)
+                              int num_med, bool lost, int *num_removed_med)
 {
     struct media_info *media_res;
     struct media_info *media;
@@ -1979,12 +1966,13 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
             continue;
         }
 
-        rc = _get_extents(adm, med_ids + i, &ext_res, &ext_cnt, false);
+        rc = get_extents_from_medium(adm, med_ids + i, &ext_res, &ext_cnt,
+                                     false);
         if (rc)
             goto out_free;
 
         dss_res_free(ext_res, ext_cnt);
-        if (ext_cnt > 0) {
+        if (!lost && ext_cnt > 0) {
             pho_warn("Media (family '%s', name '%s', library '%s') contains "
                      "extents, so cannot be removed",
                      rsc_family2str(med_ids[i].family), med_ids[i].name,
@@ -2004,9 +1992,15 @@ int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
         LOG_GOTO(out_free, rc = -ENODEV,
                  "There are no available media to remove");
 
-    rc = dss_media_delete(&adm->dss, media, avail_media);
-    if (rc)
-        pho_error(rc, "Medium cannot be removed");
+    if (lost) {
+        rc = delete_media_and_extents(adm, media, avail_media);
+        if (rc)
+            pho_error(rc, "Failed to delete media and extents");
+    } else {
+        rc = dss_media_delete(&adm->dss, media, avail_media);
+        if (rc)
+            pho_error(rc, "Medium cannot be removed");
+    }
 
     *num_removed_med = avail_media;
 
@@ -2054,6 +2048,18 @@ int phobos_admin_media_import(struct admin_handle *adm,
                        "Unable to add medium (family '%s', name '%s', library "
                        "'%s') to database", rsc_family2str(medium->family),
                        medium->name, medium->library);
+
+        if (medium->family == PHO_RSC_DIR) {
+            struct pho_id device = { .family = PHO_RSC_DIR };
+
+            memcpy(device.name, medium->name, strlen(medium->name));
+            memcpy(device.library, medium->library, strlen(medium->library));
+
+            rc = phobos_admin_device_add(adm, &device, 1, false,
+                                         medium->library);
+            if (rc)
+                return rc;
+        }
 
         rc = import_medium(adm, &med_ls[i], check_hash);
         if (rc)
@@ -2148,7 +2154,8 @@ int phobos_admin_media_library_rename(struct admin_handle *adm,
             continue;
         }
 
-        rc2 = _get_extents(adm, med_ids + i, &ext_res, &ext_cnt, false);
+        rc2 = get_extents_from_medium(adm, med_ids + i, &ext_res, &ext_cnt,
+                                      false);
         if (rc2) {
             dss_unlock(&adm->dss, DSS_MEDIA, med_res, 1, false);
             dss_res_free(med_res, 1);
@@ -2405,41 +2412,6 @@ int phobos_admin_drive_lookup(struct admin_handle *adm, struct pho_id *id,
     return drive_lookup(id->name, id->library, drive_info);
 }
 
-static int check_take_tape_lock(struct dss_handle *dss,
-                                struct media_info *med_res,
-                                const char *hostname, int pid)
-{
-    int rc;
-
-    if (med_res->lock.hostname) {
-        if (strcmp(med_res->lock.hostname, hostname))
-            LOG_RETURN(-EALREADY,
-                       "tape (name '%s', library '%s') is already locked by "
-                       "host '%s', owner/pid '%d', admin host '%s'",
-                       med_res->rsc.id.name, med_res->rsc.id.library,
-                       med_res->lock.hostname, med_res->lock.owner, hostname);
-
-        if (med_res->lock.owner != pid)
-            LOG_RETURN(-EALREADY,
-                       "tape (name '%s', library '%s') is already locked by "
-                       "host '%s', owner/pid '%d', admin host '%s' but "
-                       "owner/pid '%d'",
-                       med_res->rsc.id.name, med_res->rsc.id.library,
-                       med_res->lock.hostname, med_res->lock.owner, hostname,
-                       pid);
-    } else {
-        rc = dss_lock(dss, DSS_MEDIA, med_res, 1);
-        if (rc)
-            LOG_RETURN(rc,
-                       "admin host '%s' owner/pid '%d' failed to lock the "
-                       "tape (name '%s', library '%s')",
-                       hostname, pid, med_res->rsc.id.name,
-                       med_res->rsc.id.library);
-    }
-
-    return 0;
-}
-
 /**
  * To load, a lock is taken on the drive and on the tape to
  * prevent any concurrent move on these resources.
@@ -2508,7 +2480,8 @@ int phobos_admin_load(struct admin_handle *adm, struct pho_id *drive_id,
                  hostname, pid, dev_res->rsc.id.name, dev_res->rsc.id.library,
                  dev_res->path);
 
-    rc = check_take_tape_lock(&adm->dss, med_res, hostname, pid);
+    rc = dss_check_and_take_lock(&adm->dss, &med_res->rsc.id, &med_res->lock,
+                                 DSS_MEDIA, med_res, hostname, pid);
     if (rc)
         LOG_GOTO(unlock_drive, rc,
                  "Unable to lock the tape (name '%s', library '%s')",
@@ -2536,11 +2509,14 @@ int phobos_admin_load(struct admin_handle *adm, struct pho_id *drive_id,
     }
 
 unlock_tape:
-    rc2 = dss_unlock(&adm->dss, DSS_MEDIA, med_res, 1, false);
-    if (rc2) {
-        pho_error(rc2, "Unable to unlock tape (name '%s', family '%s')",
-                  med_res->rsc.id.name, med_res->rsc.id.library);
-        rc = rc ? : rc2;
+    /* do not unlock if there was a locate lock before the load operation */
+    if (!med_res->lock.is_early) {
+        rc2 = dss_unlock(&adm->dss, DSS_MEDIA, med_res, 1, false);
+        if (rc2) {
+            pho_error(rc2, "Unable to unlock tape (name '%s', family '%s')",
+                      med_res->rsc.id.name, med_res->rsc.id.library);
+            rc = rc ? : rc2;
+        }
     }
 
 unlock_drive:
@@ -2675,7 +2651,8 @@ int phobos_admin_unload(struct admin_handle *adm, struct pho_id *drive_id,
                  hostname, pid, dev_res->rsc.id.name, dev_res->rsc.id.library,
                  dev_res->path);
 
-    rc = check_take_tape_lock(&adm->dss, med_res, hostname, pid);
+    rc = dss_check_and_take_lock(&adm->dss, &med_res->rsc.id, &med_res->lock,
+                                 DSS_MEDIA, med_res, hostname, pid);
     if (rc)
         LOG_GOTO(unlock_drive, rc,
                  "Unable to lock the tape (name '%s', library '%s')",

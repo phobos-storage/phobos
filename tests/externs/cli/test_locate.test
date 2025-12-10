@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-#  All rights reserved (c) 2014-2022 CEA/DAM.
+#  All rights reserved (c) 2014-2025 CEA/DAM.
 #
 #  This file is part of Phobos.
 #
@@ -28,6 +28,7 @@ test_dir=$(dirname $(readlink -e $0))
 . $test_dir/setup_db.sh
 . $test_dir/test_launch_daemon.sh
 . $test_dir/tape_drive.sh
+. $test_dir/utils_generation.sh
 . test_locate_common.sh
 
 HALF_SIZE=1024
@@ -128,6 +129,7 @@ function dir_locked_splits_setup
 
     waive_lrs
 
+    export PHOBOS_IO_fs_block_size="dir=0,tape=0"
     for dir in $dirs; do
         resize_medium $dir $HALF_SIZE
     done
@@ -155,6 +157,73 @@ function tape_cleanup
     drop_tables
     drain_all_drives
     rm -rf /tmp/out*
+}
+
+function test_locate_update_timestamp_without_lock
+{
+    local drive=$(get_lto_drives 5 1)
+    $phobos drive add --unlock $drive
+
+    local tape=$(get_tapes L5 1)
+    $phobos tape add --type lto5 $tape
+    $phobos tape format --unlock $tape
+
+    local oid=$(generate_prefix_id)
+    $phobos put /etc/hosts $oid ||
+        error "Error while putting $oid"
+
+    $phobos drive unload $drive
+
+    local checkpoint1=$(date +%s)
+    sleep 1
+    $phobos locate $oid
+    sleep 1
+    local checkpoint2=$(date +%s)
+
+    local db_time=$($PSQL -t -c "SELECT last_locate FROM lock WHERE id = '${tape}_legacy';")
+    local db_time=$(date -d "$db_time" +%s)
+
+    if [ $checkpoint1 -ge $db_time ] || [ $checkpoint2 -le $db_time ]; then
+        error "Invalid locate timestamp"
+    fi
+
+    $phobos drive load $drive $tape
+
+    local db_time2=$($PSQL -t -c "SELECT last_locate FROM lock WHERE id = '${tape}_legacy';")
+    local db_time2=$(date -d "$db_time2" +%s)
+
+    if [ $db_time -ne $db_time2 ]; then
+        error "Loading tape erased last_locate timestamp"
+    fi
+}
+
+function test_last_locate_timestamp
+{
+    local drive=$(get_lto_drives 5 1)
+    $phobos drive add --unlock $drive
+
+    local tapes=( $(get_tapes L5 2 | nodeset -e) )
+    $phobos tape add --type lto5 ${tapes[@]}
+    $phobos tape format --unlock ${tapes[0]}
+
+    local oid=$(generate_prefix_id)
+    $phobos put /etc/hosts $oid ||
+        error "Error while putting $oid"
+
+    waive_lrs
+
+    export PHOBOS_LRS_locate_lock_expirancy=5000
+
+    invoke_lrs
+
+    local date_start=$(date +%s)
+    $phobos locate $oid
+    $phobos tape format ${tapes[1]} || error "Format should have succeeded"
+    local date_end=$(date +%s)
+    local difference=$((date_end - date_start))
+
+    test $difference -ge 5 ||
+        error "Format should have waited for locate expirancy"
 }
 
 function test_locate_compatibility
@@ -405,6 +474,7 @@ TESTS=("dir_setup; \
         test_medium_locate dir; \
         test_locate_cli dir; \
         test_get_locate_cli dir; \
+        test_locate_update_timestamp dir; \
         dir_cleanup")
 TESTS+=("dir_locked_splits_setup; \
          test_locate_locked_splits dir $FULL_SIZE; \
@@ -415,7 +485,15 @@ if [[ -w /dev/changer ]]; then
              test_medium_locate tape; \
              test_locate_cli tape; \
              test_get_locate_cli tape; \
+             test_locate_update_timestamp tape; \
              tape_cleanup")
+# XXX: This test remains disabled until early lock without locate is fixed
+#    TESTS+=("tape_init_setup; \
+#             test_locate_update_timestamp_without_lock; \
+#             tape_cleanup")
+    TESTS+=("tape_init_setup; \
+             test_last_locate_timestamp; \
+             tape_cleanup");
     TESTS+=("tape_init_setup; \
              test_locate_compatibility; \
              tape_cleanup")

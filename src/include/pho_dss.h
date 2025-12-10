@@ -128,10 +128,13 @@ enum dss_set_action {
     DSS_SET_INVAL  = -1,
     DSS_SET_INSERT =  0,
     DSS_SET_FULL_INSERT, /** A full insert is an insert which overrides
-                           *  the default values when adding a row. In the case
-                           *  of an object, it means adding a preexisting object
-                           *  with a particular uuid and version, not the
-                           *  default DSS values.
+                           *  the default values when adding a row.
+                           *  In the case of an object, it means adding a
+                           *  preexisting object with a particular uuid and
+                           *  version, not the default DSS values.
+                           *  In the case of an extent, it means setting a
+                           *  provided creation time instead of the default
+                           *  "now" DSS value.
                            */
     DSS_SET_UPDATE,
     DSS_SET_DELETE,
@@ -194,6 +197,7 @@ static struct dss_field_def dss_fields_names[] = {
     {"DSS::EXT::md5", "hash->>'md5'"},
     {"DSS::EXT::xxh128", "hash->>'xxh128'"},
     {"DSS::EXT::info", "info"},
+    {"DSS::EXT::creation_time", "creation_time"},
     /* Media related fields */
     {"DSS::MDA::family", "family"},
     {"DSS::MDA::model", "model"},
@@ -473,7 +477,7 @@ int dss_media_delete(struct dss_handle *handle, struct media_info *media_list,
  * @return 0 on success, negated errno on failure
  */
 int dss_extent_insert(struct dss_handle *handle, struct extent *extents,
-                      int extent_count);
+                      int extent_count, enum dss_set_action action);
 
 /**
  * Update information for one or many extents in DSS.
@@ -496,11 +500,13 @@ int dss_extent_update(struct dss_handle *handle, struct extent *src_extents,
  * @param[out] extents       list of retrieved items to be freed
  *                           w/ dss_res_free()
  * @param[out] extent_count  number of items retrieved in the list
+ * @param[in]  sort          sort filter
  *
  * @return 0 on success, negated errno on failure
  */
 int dss_extent_get(struct dss_handle *handle, const struct dss_filter *filter,
-                   struct extent **extents, int *extent_count);
+                   struct extent **extents, int *extent_count,
+                   struct dss_sort *sort);
 
 /**
  * Delete information for one or many extent in DSS.
@@ -838,6 +844,28 @@ int dss_lock_hostname(struct dss_handle *handle, enum dss_type type,
                       const char *hostname);
 
 /**
+ * Take lock and set its last_locate field, only used if an early lock was
+ * previously taken for those items.
+ *
+ * If any lock cannot be taken, then the ones that already are will be
+ * forcefully unlocked, and the function will not try to lock any other
+ * resource (all-or-nothing policy).
+ *
+ * @param[in]   handle          DSS handle.
+ * @param[in]   type            Type of the resources to lock.
+ * @param[in]   item_list       List of resources to lock.
+ * @param[in]   item_cnt        Number of resources to lock.
+ * @param[in]   last_locate     Last early lock timestamp.
+ *
+ * @return                      0 on success,
+ *                             -EEXIST if one of the targeted locks already
+ *                              exists.
+ */
+int dss_lock_with_last_locate(struct dss_handle *handle, enum dss_type type,
+                              const void *item_list, int item_cnt,
+                              struct timeval *last_locate);
+
+/**
  * Refresh lock timestamps.
  *
  * The function will attempt to refresh as many locks as possible. Should any
@@ -848,13 +876,14 @@ int dss_lock_hostname(struct dss_handle *handle, enum dss_type type,
  * @param[in]   type            Type of the ressources's lock to refresh.
  * @param[in]   item_list       List of ressources's lock to refresh.
  * @param[in]   item_cnt        Number of ressources's lock to refresh.
+ * @param[in]   locate          True if only need to update `last_locate` field.
  *
  * @return                      0 on success,
  *                             -ENOLCK if the lock does not exist,
  *                             -EACCES if the lock owner does not match.
  */
 int dss_lock_refresh(struct dss_handle *handle, enum dss_type type,
-                     const void *item_list, int item_cnt);
+                     const void *item_list, int item_cnt, bool locate);
 
 /**
  * Release locks.

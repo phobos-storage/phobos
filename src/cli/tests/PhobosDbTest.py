@@ -28,8 +28,8 @@ import os
 import shutil
 from subprocess import Popen, PIPE
 import tempfile
-import unittest
 import time
+import unittest
 
 from phobos.db import Migrator, ORDERED_SCHEMAS, CURRENT_SCHEMA_VERSION, \
                       AVAIL_SCHEMAS, FUTURE_SCHEMAS
@@ -101,17 +101,36 @@ class MigratorTest(unittest.TestCase):
             if idx == 0:
                 continue
             self.migrator.create_schema(version)
-            process = Popen(['sudo', '-u', 'postgres', 'pg_dump', '-s',
-                             '-U', 'phobos', '-f', '/tmp/schema_dump',
-                             'phobos_test'])
+            # Add --restrict-key option because since PostgreSQL 13.22, the
+            # pg_dump command appends a `\restrict key` to the dump file. If the
+            # key is not provided, it is generated randomly.
+            process = Popen("psql --version | awk '{print $3}'",
+                            shell=True, stdout=PIPE)
+            out_version, _ = process.communicate()
+
+            if float(out_version) >= 13.22:
+                process = Popen(['sudo', '-u', 'postgres', 'pg_dump', '-s',
+                                 '-U', 'phobos', f'--restrict-key=key{idx}',
+                                 '-f', '/tmp/schema_dump', 'phobos_test'])
+            else:
+                process = Popen(['sudo', '-u', 'postgres', 'pg_dump', '-s',
+                                 '-U', 'phobos', '-f', '/tmp/schema_dump',
+                                 'phobos_test'])
+
             process.wait()
             self.migrator.drop_tables()
 
             self.migrator.create_schema(ORDERED_SCHEMAS[idx - 1])
             self.migrator.migrate(version)
-            process = Popen(['sudo', '-u', 'postgres', 'pg_dump', '-s',
-                             '-U', 'phobos', '-f', '/tmp/migrate_dump',
-                             'phobos_test'])
+            if float(out_version) >= 13.22:
+                process = Popen(['sudo', '-u', 'postgres', 'pg_dump', '-s',
+                                 '-U', 'phobos', f'--restrict-key=key{idx}',
+                                 '-f', '/tmp/migrate_dump', 'phobos_test'])
+            else:
+                process = Popen(['sudo', '-u', 'postgres', 'pg_dump', '-s',
+                                 '-U', 'phobos', '-f', '/tmp/migrate_dump',
+                                 'phobos_test'])
+
             process.wait()
             self.migrator.drop_tables()
 
@@ -142,6 +161,7 @@ class MigratorTest(unittest.TestCase):
         Popen("pid=$(pgrep phobosd); kill $pid; while kill -0 $pid; \
                do sleep 1; done", shell=True).wait()
         shutil.rmtree('/run/phobosd')
+        os.unlink('oid-file')
 
         self.migrator.drop_tables()
         if not success:
@@ -210,12 +230,12 @@ class MigratorTest(unittest.TestCase):
 
             # Check that phobosd is running
             nb_try = 0
-            process = Popen('$phobos ping phobosd', shell=True, stdout=PIPE)
+            process = Popen('$phobos phobosd ping', shell=True, stdout=PIPE)
             result, _ = process.communicate()
             while process.returncode and nb_try < 5:
                 time.sleep(0.5)
                 nb_try += 1
-                process = Popen('$phobos ping phobosd', shell=True, stdout=PIPE)
+                process = Popen('$phobos phobosd ping', shell=True, stdout=PIPE)
                 result, _ = process.communicate()
 
             if process.returncode:
@@ -232,67 +252,6 @@ class MigratorTest(unittest.TestCase):
                                                    "than '/etc/hosts'")
 
             self.exit_put_get_migration(True)
-
-    def test_1_95_to_2_0(self):
-        """
-        Test migration between 1.95 and 2.0, checking object and extent
-        information are correctly scattered
-        """
-        self.migrator.create_schema("1.95")
-
-        self.migrator.execute("""
-            INSERT INTO object(oid, uuid, user_md)
-                VALUES ('aries', 'dacfaeba-24ef-431b-a7b3-205dc1e8a34a',
-                        '{"test": "42"}');
-
-            INSERT INTO extent(oid, uuid, version, state, lyt_info, extents)
-                VALUES ('aries', 'dacfaeba-24ef-431b-a7b3-205dc1e8a34a', 1,
-                        'sync',
-                        '{"name": "raid1", "attrs": {"repl_count": "2"},
-                          "major": 0, "minor": 2}',
-                        '[{"sz": 42, "fam": "dir", "md5": "babecafe",
-                           "addr": "ab/cd/part1", "media": "dir1"},
-                          {"sz": 43, "fam": "dir", "md5": "babecaff",
-                           "addr": "ef/01/part2", "media": "dir2"}]'
-                );
-        """)
-
-        self.migrator.migrate("2.0")
-        self.assertEqual(self.migrator.schema_version(), "2.0")
-        self.assertEqual(
-            self.migrator.execute("SELECT * FROM object;", output=True),
-            [(
-                'aries', {'test': '42'},
-                'dacfaeba-24ef-431b-a7b3-205dc1e8a34a', 1,
-                {"name": "raid1", "attrs": {"repl_count": "2"},
-                 "major": 0, "minor": 2}, 'complete'
-            )]
-        )
-        ext_uuids = self.migrator.execute(
-            "SELECT extent_uuid FROM extent ORDER BY size;",
-            output=True
-        )
-        self.assertEqual(
-            self.migrator.execute("""
-                SELECT extent_uuid, state, size, medium_family, medium_id,
-                    address, hash->>'md5'
-                FROM extent ORDER BY size;
-            """, output=True),
-            [
-                (ext_uuids[0][0], 'sync', 42, 'dir', 'dir1', 'ab/cd/part1',
-                 'babecafe'),
-                (ext_uuids[1][0], 'sync', 43, 'dir', 'dir2', 'ef/01/part2',
-                 'babecaff')
-            ]
-        )
-        self.assertEqual(
-            self.migrator.execute("SELECT * FROM layout;", output=True),
-            [
-                ('dacfaeba-24ef-431b-a7b3-205dc1e8a34a', 1, ext_uuids[0][0], 0),
-                ('dacfaeba-24ef-431b-a7b3-205dc1e8a34a', 1, ext_uuids[1][0], 1)
-            ]
-        )
-        self.migrator.drop_tables()
 
     def test_2_2_to_3(self):
         """Test migration between 2.2 and 3.0"""
@@ -338,6 +297,73 @@ class MigratorTest(unittest.TestCase):
             [
                 ('dacfaeba-24ef-431b-a7b3-205dc1e8a34b', 1, 'source'),
                 ('dacfaeba-24ef-431b-a7b3-205dc1e8a34a', 2, 'source')
+            ]
+        )
+        self.migrator.drop_tables()
+
+    def test_3_to_3_2(self):
+        """Test migration between 3.0 and 3.2"""
+        self.migrator.create_schema("3.0")
+
+        self.migrator.execute("""
+            INSERT INTO object (oid, object_uuid, version)
+                VALUES ('blob', '4757e720-651e-4daa-8bb0-45a86b231a34', 2);
+
+            INSERT INTO deprecated_object (oid, object_uuid, version)
+                VALUES ('blob', '4757e720-651e-4daa-8bb0-45a86b231a34', 1);
+
+            INSERT INTO copy (object_uuid, version, copy_name, lyt_info)
+                VALUES ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, 'source',
+                        '{"name": "raid1", "attrs": {"raid1.repl_count": "2"},
+                          "major": 0, "minor": 2}'),
+                       ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, 'source',
+                        '{"name": "raid4", "major": 0, "minor": 1}');
+
+            INSERT INTO layout (object_uuid, version, extent_uuid, layout_index, copy_name) VALUES
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, '0780c865-ba1d-4677-b22c-84e7fdfc6925', 0, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, 'a27b8867-eda9-411a-9435-74ddd284faa2', 1, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, 'c0be5ee0-202b-404f-80d2-ade630910825', 2, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, '6a17a9cc-d5db-401a-82d6-220d0113ea34', 3, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, 'ed97f05f-c5b7-4bd4-b021-ae3271bd15d1', 4, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 1, '826283ca-289d-42dd-a156-c429ac11181e', 5, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, '5c1df00f-38c3-4198-94f3-624143671e48', 0, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, 'bc886ddb-6ffb-4d39-8180-f3cd70736847', 1, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, '2b7f9624-eabe-4a81-a3a5-13499cb765f4', 2, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, '5d184974-700c-4bc5-9528-a720c37b74f5', 3, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, '8f0cf40c-a73a-45c0-b14f-b16457e1c9b8', 4, 'source'),
+                ('4757e720-651e-4daa-8bb0-45a86b231a34', 2, 'b3daba00-d068-49bc-b35d-668e09afb5d3', 5, 'source');
+
+            INSERT INTO extent (extent_uuid, size, medium_library) VALUES
+                ('0780c865-ba1d-4677-b22c-84e7fdfc6925', 931840, 'legacy'),
+                ('a27b8867-eda9-411a-9435-74ddd284faa2', 931840, 'legacy'),
+                ('c0be5ee0-202b-404f-80d2-ade630910825', 931840, 'legacy'),
+                ('6a17a9cc-d5db-401a-82d6-220d0113ea34', 931840, 'legacy'),
+                ('ed97f05f-c5b7-4bd4-b021-ae3271bd15d1', 876320, 'legacy'),
+                ('826283ca-289d-42dd-a156-c429ac11181e', 876320, 'legacy'),
+                ('5c1df00f-38c3-4198-94f3-624143671e48', 931840, 'legacy'),
+                ('bc886ddb-6ffb-4d39-8180-f3cd70736847', 931840, 'legacy'),
+                ('2b7f9624-eabe-4a81-a3a5-13499cb765f4', 931840, 'legacy'),
+                ('5d184974-700c-4bc5-9528-a720c37b74f5', 438160, 'legacy'),
+                ('8f0cf40c-a73a-45c0-b14f-b16457e1c9b8', 438160, 'legacy'),
+                ('b3daba00-d068-49bc-b35d-668e09afb5d3', 438160, 'legacy')
+        """)
+
+        self.migrator.migrate("3.2")
+        self.assertEqual(self.migrator.schema_version(), "3.2")
+        self.assertEqual(
+            self.migrator.execute("""
+                SELECT oid, size FROM object;
+            """, output=True),
+            [
+                ('blob', 2740000)
+            ]
+        )
+        self.assertEqual(
+            self.migrator.execute("""
+                SELECT oid, size FROM deprecated_object;
+            """, output=True),
+            [
+                ('blob', 2740000)
             ]
         )
         self.migrator.drop_tables()

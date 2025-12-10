@@ -418,8 +418,10 @@ bool _pho_cfg_get_bool(int first_index, int last_index, int param_index,
         return default_val;
 }
 
-int pho_cfg_get_substring_value(const char *section, const char *name,
-                                enum rsc_family family, char **substring)
+int _pho_cfg_get_substring_value(int first_index, int last_index,
+                                 int param_index,
+                                 const struct pho_config_item *module_params,
+                                 enum rsc_family family, char **substring)
 {
     const char *cfg_val;
     char *token_dup;
@@ -427,9 +429,11 @@ int pho_cfg_get_substring_value(const char *section, const char *name,
     char *key;
     int rc;
 
-    rc = pho_cfg_get_val(section, name, &cfg_val);
-    if (rc)
-        return rc;
+    cfg_val = _pho_cfg_get(first_index, last_index, param_index, module_params);
+    if (!cfg_val) {
+        pho_debug("Failed to retrieve config parameter #%d", param_index);
+        return -ENODATA;
+    }
 
     token_dup = xstrdup(cfg_val);
 
@@ -459,7 +463,6 @@ int pho_cfg_get_substring_value(const char *section, const char *name,
     free(token_dup);
 
     return rc;
-
 }
 
 /** @TODO to be implemented

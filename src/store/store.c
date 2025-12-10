@@ -308,7 +308,7 @@ static int first_data_processor_call(struct pho_data_processor *proc,
         if (rc)
             return rc;
 
-        assert(n_reqs == 0); /* an encoder writer generates no request */
+        assert(n_reqs == 0); /* a decoder writer generates no request */
         /* init reader */
         rc = proc->reader_ops->step(proc, NULL, &requests, &n_reqs);
     } else if (is_eraser(proc)) {
@@ -391,7 +391,6 @@ static int processor_communicate(struct pho_data_processor *proc,
     if (rc)
         return rc;
 
-
     /* A release generates no new IO. */
     if (pho_response_is_release(resp) &&
         !pho_response_is_partial_release(resp)) {
@@ -411,10 +410,14 @@ static int processor_communicate(struct pho_data_processor *proc,
     /* no more io needed after a completed write step */
     while (!rc && !writer_done) {
         /* try read first */
-        if (!reader_done && proc->reader_offset == proc->writer_offset &&
-            !proc->object_size == 0) {
+        if ((!reader_done && proc->reader_offset == proc->writer_offset &&
+            proc->object_size != 0) ||
+            /* on error we need to call the reader one last time to generate
+             * release requests.
+             */
+            rc) {
             rc = proc->reader_ops->step(proc, NULL, &requests, &n_reqs);
-            if (n_reqs) {
+            if (rc || n_reqs) {
                 rc = send_generated_requests(proc, comm, enc_id, requests,
                                              n_reqs, rc);
                 requests = NULL;
@@ -423,7 +426,7 @@ static int processor_communicate(struct pho_data_processor *proc,
             }
         }
 
-        /* only one posix writing is enough for decoder after a read step */
+        /* only one write is enough for decoder after a read step */
         if (!rc && reader_done && is_decoder(proc)) {
             rc = proc->writer_ops->step(proc, NULL, &requests, &n_reqs);
             assert(n_reqs == 0);
@@ -431,13 +434,33 @@ static int processor_communicate(struct pho_data_processor *proc,
         }
 
         /* then try following write */
-        if (!rc && (proc->reader_offset > proc->writer_offset ||
-                proc->object_size == 0)) {
+        if (proc->reader_offset > proc->writer_offset ||
+            proc->object_size == 0 ||
+            /* on error we need to call the writer one last time to generate
+             * release requests.
+             */
+            rc) {
             rc = proc->writer_ops->step(proc, NULL, &requests, &n_reqs);
-            if (n_reqs) {
+            if (rc || n_reqs) {
                 /* no more io needed after a completed write step */
-                return send_generated_requests(proc, comm, enc_id, requests,
-                                               n_reqs, rc);
+                int rc2 = send_generated_requests(proc, comm, enc_id, requests,
+                                                  n_reqs, rc);
+                if (rc == 0 && rc2 != 0)
+                    LOG_RETURN(rc2, "failed to send requests to phobosd");
+
+                if (!rc)
+                    return 0;
+
+                /* writer's step function failed, call reader's step one last
+                 * time in case something needs to be released.
+                 */
+                n_reqs = 0;
+                rc2 = proc->reader_ops->step(proc, NULL, &requests, &n_reqs);
+                if (n_reqs)
+                    return send_generated_requests(proc, comm, enc_id,
+                                                   requests, n_reqs, rc);
+
+                return rc2;
             }
         }
     }
@@ -512,6 +535,7 @@ int object_md_save(struct dss_handle *dss, struct pho_xfer_target *xfer,
     obj.oid = xfer->xt_objid;
     obj.user_md = md_repr->str;
     obj.grouping = grouping;
+    obj.size = xfer->xt_size;
 
     rc = dss_lock(dss, DSS_OBJECT, &obj, 1);
     if (rc)
@@ -568,6 +592,7 @@ int object_md_save(struct dss_handle *dss, struct pho_xfer_target *xfer,
         save_obj_res_grouping = obj_res->grouping;
         obj_res->grouping = grouping;
         ++obj_res->version;
+        obj_res->size = xfer->xt_size;
         if (!pho_attrs_is_empty(&xfer->xt_attrs))
             obj_res->user_md = md_repr->str;
 
@@ -1015,6 +1040,7 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
     /* can't get md for undel without any objid */
     /* TODO: really necessary to create decoder for getmd, del and undel OP ? */
     if (xfer->xd_op != PHO_XFER_OP_UNDEL && xfer->xd_op != PHO_XFER_OP_GET &&
+        xfer->xd_op != PHO_XFER_OP_COPY &&
         (xfer->xd_op != PHO_XFER_OP_DEL &&
          !(xfer->xd_flags & PHO_XFER_OBJ_HARD_DEL))) {
         rc = object_md_get(dss, xfer->xd_targets);
@@ -1038,12 +1064,15 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
     if (!xfer->xd_targets->xt_objid && !xfer->xd_targets->xt_objuuid)
         LOG_RETURN(rc = -EINVAL, "uuid or oid must be provided");
 
-    if (xfer->xd_op == PHO_XFER_OP_GET)
+    if (xfer->xd_op == PHO_XFER_OP_GET) {
+        proc->type = PHO_PROC_DECODER;
         /* Keep dss_lazy_find with the get to keep the same behavior */
         rc = dss_lazy_find_object(dss, xfer->xd_targets->xt_objid,
                                   xfer->xd_targets->xt_objuuid,
                                   xfer->xd_targets->xt_version, &obj);
-    else
+    } else {
+        proc->type = (xfer->xd_op == PHO_XFER_OP_DEL ? PHO_PROC_ERASER :
+                                                       PHO_PROC_COPIER);
         rc = dss_find_object(dss, xfer->xd_targets->xt_objid,
                              xfer->xd_targets->xt_objuuid,
                              xfer->xd_targets->xt_version,
@@ -1051,25 +1080,41 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
                                 xfer->xd_params.delete.scope :
                                 xfer->xd_params.copy.get.scope,
                              &obj);
+    }
     if (rc)
         LOG_RETURN(rc, "Cannot find object for objid:'%s'",
                    xfer->xd_targets->xt_objid);
+
+    /* This object size set is necessary for non-put commands because we can
+     * only handle one target at a time. However for the put command, it is
+     * mostly useless, as we may have multiple targets in a single call, each
+     * with their own object sizes. The actual object sizes are thus properly
+     * handled later down the "put" line.
+     */
+    proc->object_size = obj->size;
+
+    /* use existing grouping as default for copy */
+    /* put grouping attribute must not be preset for a copy operation */
+    if (proc->type == PHO_PROC_COPIER)
+        xfer->xd_params.copy.put.grouping = xstrdup_safe(obj->grouping);
 
     rc = get_copy(dss, xfer, obj, &copy);
     if (rc)
         return rc;
 
     if (copy->copy_status == PHO_COPY_STATUS_INCOMPLETE) {
+        pho_error(rc = -EINVAL,
+                  "Status of copy '%s' for the object '%s' is incomplete, cannot be read",
+                  copy->copy_name, obj->oid);
         copy_info_free(copy);
-        LOG_RETURN(rc = -ENOENT, "Status of copy '%s' for the object '%s' is "
-                  "incomplete, cannot be reconstructed", copy->copy_name,
-                  obj->oid);
+        return rc;
     }
 
     if (copy->copy_status != PHO_COPY_STATUS_COMPLETE)
-        pho_warn("Copy '%s' status for the object '%s' is %s.", copy->copy_name,
+        pho_warn("Copy '%s' status for the object '%s' is %s", copy->copy_name,
                  obj->oid, copy_status2str(copy->copy_status));
 
+    proc->src_copy_ctime = copy->creation_time;
     rc = copy_object_info_into_xfer(obj, xfer->xd_targets);
     object_info_free(obj);
     if (rc)
@@ -1172,9 +1217,13 @@ static int store_end_encoder_xfer(struct phobos_handle *pho,
     int i;
 
     for (i = 0; i < xfer->xd_ntargets; i++) {
+        if (xfer->xd_targets[i].xt_rc)
+            continue;
+
         pho_debug("Saving layout for objid:'%s'", xfer->xd_targets[i].xt_objid);
         rc = dss_extent_insert(&pho->dss, encoder->dest_layout[i].extents,
-                               encoder->dest_layout[i].ext_count);
+                               encoder->dest_layout[i].ext_count,
+                               DSS_SET_FULL_INSERT);
         if (rc)
             LOG_RETURN(rc, "Error while saving extents for objid: '%s'",
                        xfer->xd_targets[i].xt_objid);
@@ -1236,6 +1285,15 @@ static int store_end_decoder_xfer(struct phobos_handle *pho,
     return rc;
 }
 
+static bool success_on_partial_put(struct pho_xfer_desc *xfer)
+{
+    for (int i = 0; i < xfer->xd_ntargets; i++)
+        if (xfer->xd_targets[i].xt_rc == 0)
+            return true;
+
+    return false;
+}
+
 /**
  * Mark the end of a transfer (successful or not) by updating the processor
  * structure, saving the data processor layout to the DSS if necessary, properly
@@ -1253,6 +1311,7 @@ static void store_end_xfer(struct phobos_handle *pho, size_t xfer_idx, int rc)
 {
     struct pho_data_processor *proc = &pho->processors[xfer_idx];
     struct pho_xfer_desc *xfer = &pho->xfers[xfer_idx];
+    bool update_partial_put;
     int i;
 
     /* Don't end an encoder twice */
@@ -1264,7 +1323,15 @@ static void store_end_xfer(struct phobos_handle *pho, size_t xfer_idx, int rc)
     pho->n_ended_xfers++;
     proc->done = true;
 
-    if (xfer->xd_rc || rc)
+    if (xfer->xd_rc == 0 && rc != 0)
+        xfer->xd_rc = rc;
+
+    /* If a part of the put suceeded, the objects, copies and extents that were
+     * written should be properly updated and kept in the database, so don't
+     * skip them in case of errors.
+     */
+    update_partial_put = is_encoder(proc) && success_on_partial_put(xfer);
+    if (!update_partial_put && (xfer->xd_rc || rc))
         goto cont;
 
     /* Once the encoder is done and successful, save the layout and metadata */
@@ -1287,14 +1354,15 @@ cont:
                  is_uuid_arg(&xfer->xd_targets[i], xfer->xd_op) ?
                     "uuid" : "oid",
                  oid_or_uuid_val(&xfer->xd_targets[i], xfer->xd_op),
-                 xfer->xd_rc ? "failed" : "succeeded");
+                 xfer->xd_targets[i].xt_rc ? "failed" : "succeeded");
 
     /* Cleanup metadata for failed PUT */
     if (pho->md_created && pho->md_created[xfer_idx] &&
             xfer->xd_op == PHO_XFER_OP_PUT && xfer->xd_rc) {
         for (i = 0; i < xfer->xd_ntargets; i++)
-            object_md_del(&pho->dss, &xfer->xd_targets[i],
-                          xfer->xd_params.put.copy_name);
+            if (xfer->xd_targets[i].xt_rc)
+                object_md_del(&pho->dss, &xfer->xd_targets[i],
+                              xfer->xd_params.put.copy_name);
     }
 
     /* Cleanup metadata for failed COPY */
@@ -1415,11 +1483,8 @@ static int store_init(struct phobos_handle *pho, struct pho_xfer_desc *xfers,
         if (rc)
             return rc;
 
-        /* Xfer can only contain more than 1 object if it's a PUT operation
-         * with the no_split option.
-         */
-        if (xfers->xd_ntargets > 1 && !xfers->xd_params.put.no_split &&
-            xfers->xd_op != PHO_XFER_OP_PUT)
+        /* Xfer can only contain more than 1 target if it's a PUT operation */
+        if (xfers->xd_ntargets > 1 && xfers->xd_op != PHO_XFER_OP_PUT)
             return -ENOTSUP;
     }
 
@@ -1483,7 +1548,7 @@ static int store_lrs_response_process(struct phobos_handle *pho,
     int rc;
 
     pho_debug("%s %d for %d objid(s) received a response of type %s",
-              processor_type2str(proc), resp->req_id,
+              processor_type2str(proc), proc->current_target,
               proc->xfer->xd_ntargets, pho_srl_response_kind_str(resp));
 
     rc = processor_communicate(proc, &pho->comm, resp, resp->req_id);
@@ -1735,6 +1800,7 @@ int phobos_put(struct pho_xfer_desc *xfers, size_t n,
                pho_completion_cb_t cb, void *udata)
 {
     size_t i;
+    size_t j;
     int rc;
 
     /* Ensure conf is loaded, to retrieve default values */
@@ -1745,6 +1811,8 @@ int phobos_put(struct pho_xfer_desc *xfers, size_t n,
     for (i = 0; i < n; i++) {
         xfers[i].xd_op = PHO_XFER_OP_PUT;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
 
         rc = fill_put_params(&xfers[i]);
         if (rc)
@@ -1768,6 +1836,8 @@ int phobos_get(struct pho_xfer_desc *xfers, size_t n,
     for (i = 0; i < n; i++) {
         xfers[i].xd_op = PHO_XFER_OP_GET;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
         /* If the uuid is given by the user, we don't own that memory.
          * The simplest solution is to duplicate it here so that it can
          * be freed at the end by pho_xfer_desc_clean().
@@ -1852,11 +1922,14 @@ int phobos_get(struct pho_xfer_desc *xfers, size_t n,
 int phobos_getmd(struct pho_xfer_desc *xfers, size_t n,
                  pho_completion_cb_t cb, void *udata)
 {
+    size_t j;
     size_t i;
 
     for (i = 0; i < n; i++) {
         xfers[i].xd_op = PHO_XFER_OP_GETMD;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
     }
 
     return phobos_xfer(xfers, n, cb, udata);
@@ -1864,11 +1937,14 @@ int phobos_getmd(struct pho_xfer_desc *xfers, size_t n,
 
 int phobos_delete(struct pho_xfer_desc *xfers, size_t num_xfers)
 {
+    size_t j;
     size_t i;
 
     for (i = 0; i < num_xfers; i++) {
         xfers[i].xd_op = PHO_XFER_OP_DEL;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
         /* If the uuid is given by the user, we don't own that memory.
          * The simplest solution is to duplicate it here so that it can
          * be freed at the end by pho_xfer_desc_clean().
@@ -1890,10 +1966,13 @@ int phobos_delete(struct pho_xfer_desc *xfers, size_t num_xfers)
 int phobos_undelete(struct pho_xfer_desc *xfers, size_t num_xfers)
 {
     size_t i;
+    size_t j;
 
     for (i = 0; i < num_xfers; i++) {
         xfers[i].xd_op = PHO_XFER_OP_UNDEL;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
     }
 
     return phobos_xfer(xfers, num_xfers, NULL, NULL);
@@ -1973,20 +2052,25 @@ clean:
 
 static void xfer_put_param_clean(struct pho_xfer_desc *xfer)
 {
-    struct pho_xfer_put_params *put_params;
+    string_array_free(&xfer->xd_params.put.tags);
+    pho_attrs_free(&xfer->xd_params.put.lyt_params);
+}
 
-    if (xfer->xd_op == PHO_XFER_OP_COPY)
-        put_params = &xfer->xd_params.copy.put;
-    else
-        put_params = &xfer->xd_params.put;
-
-    string_array_free(&put_params->tags);
-    pho_attrs_free(&put_params->lyt_params);
+static void xfer_copy_param_clean(struct pho_xfer_desc *xfer)
+{
+    free((void *)xfer->xd_params.copy.put.grouping);
+    xfer->xd_params.copy.put.grouping = NULL;
+    string_array_free(&xfer->xd_params.copy.put.tags);
+    pho_attrs_free(&xfer->xd_params.copy.put.lyt_params);
 }
 
 static void (*xfer_param_cleaner[PHO_XFER_OP_LAST])(struct pho_xfer_desc *) = {
-    xfer_put_param_clean,
-    NULL,
+    [PHO_XFER_OP_PUT]   = xfer_put_param_clean,
+    [PHO_XFER_OP_GET]   = NULL,
+    [PHO_XFER_OP_GETMD] = NULL,
+    [PHO_XFER_OP_DEL]   = NULL,
+    [PHO_XFER_OP_UNDEL] = NULL,
+    [PHO_XFER_OP_COPY]  = xfer_copy_param_clean,
 };
 
 void pho_xfer_desc_clean(struct pho_xfer_desc *xfer)
@@ -2080,6 +2164,7 @@ int phobos_copy(struct pho_xfer_desc *xfers, size_t n,
                 pho_completion_cb_t cb, void *udata)
 {
     size_t i;
+    size_t j;
     int rc;
 
     /* Ensure conf is loaded, to retrieve default values */
@@ -2088,8 +2173,19 @@ int phobos_copy(struct pho_xfer_desc *xfers, size_t n,
         return rc;
 
     for (i = 0; i < n; i++) {
+        if (xfers[i].xd_params.copy.put.grouping) {
+            pho_error(rc = -EINVAL,
+                      "A xfer to create a new copy must not have a grouping "
+                      "put param because the grouping is inherited from the "
+                      "existing object. \"%s\" was set instead of NULL.",
+                      xfers[i].xd_params.put.grouping);
+            return rc;
+        }
+
         xfers[i].xd_op = PHO_XFER_OP_COPY;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
         /* If the uuid is given by the user, we don't own that memory.
          * The simplest solution is to duplicate it here so that it can
          * be freed at the end by pho_xfer_desc_clean().
@@ -2115,10 +2211,13 @@ int phobos_copy(struct pho_xfer_desc *xfers, size_t n,
 int phobos_copy_delete(struct pho_xfer_desc *xfers, size_t num_xfers)
 {
     size_t i;
+    size_t j;
 
     for (i = 0; i < num_xfers; i++) {
         xfers[i].xd_op = PHO_XFER_OP_DEL;
         xfers[i].xd_rc = 0;
+        for (j = 0; j < xfers[i].xd_ntargets; j++)
+            xfers[i].xd_targets[j].xt_rc = 0;
         /* If the uuid is given by the user, we don't own that memory.
          * The simplest solution is to duplicate it here so that it can
          * be freed at the end by pho_xfer_desc_clean().

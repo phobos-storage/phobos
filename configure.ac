@@ -4,11 +4,25 @@
 
 AC_PREREQ(2.59)
 
-AC_INIT([phobos], [3.1.0], [st-hpc@cea.fr])
-PHOBOS_RELEASE="1"
+m4_define([PHOBOS_VERSION_MAJOR], [3])
+m4_define([PHOBOS_VERSION_MINOR], [2])
+m4_define([PHOBOS_VERSION_PATCH], [0])
+m4_define([PHOBOS_VERSION_RELEASE], [1])
 
-AC_DEFINE_UNQUOTED(PHOBOS_RELEASE, "$PHOBOS_RELEASE", [release info])
+m4_define([PHOBOS_VERSION],
+          [PHOBOS_VERSION_MAJOR.PHOBOS_VERSION_MINOR.PHOBOS_VERSION_PATCH])
+AC_INIT([phobos], [PHOBOS_VERSION], [st-hpc@cea.fr])
+
+AC_DEFINE_UNQUOTED(PHOBOS_MAJOR, PHOBOS_VERSION_MAJOR,
+                   [Phobos major version number])
+AC_DEFINE_UNQUOTED(PHOBOS_MINOR, PHOBOS_VERSION_MINOR,
+                   [Phobos minor version number])
+AC_DEFINE_UNQUOTED(PHOBOS_PATCH, PHOBOS_VERSION_PATCH,
+                   [Phobos patch version number])
+AC_DEFINE_UNQUOTED(PHOBOS_RELEASE, PHOBOS_VERSION_RELEASE, [release info])
+PHOBOS_RELEASE="PHOBOS_VERSION_RELEASE"
 AC_SUBST(PHOBOS_RELEASE)
+
 
 AC_CONFIG_AUX_DIR([autotools])
 AC_CONFIG_MACRO_DIR([autotools/m4])
@@ -126,16 +140,13 @@ AC_SUBST(ac_configure_args)
 AC_CONFIG_FILES([Makefile
          src/Makefile
          src/include/Makefile
-         src/core/common/Makefile
          src/module-loader/Makefile
          src/ldm/Makefile
-         src/core/dss/Makefile
-         src/core/cfg/Makefile
          src/lrs/Makefile
          src/io/Makefile
          src/layout/Makefile
+         src/core/Makefile
          src/core/serializer/Makefile
-         src/core/communication/Makefile
          src/store/Makefile
          src/io-modules/Makefile
          src/layout-modules/Makefile
@@ -145,6 +156,7 @@ AC_CONFIG_FILES([Makefile
          src/tlc/Makefile
          src/tlc/scsi/Makefile
          src/daemon/Makefile
+         src/hsm/Makefile
          tests/Makefile
          tests/interns/Makefile
          tests/externs/api/Makefile

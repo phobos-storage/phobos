@@ -290,6 +290,7 @@ class Client: # pylint: disable=too-many-public-methods
         layouts = pointer(LayoutInfo())
         library_name = kwargs.get('library')
         copy_name = kwargs.get('copy_name')
+        orphan = kwargs.get('orphan')
 
         enc_medium = medium.encode('utf-8') if medium else None
         enc_library = library_name.encode('utf-8') if library_name else None
@@ -308,6 +309,7 @@ class Client: # pylint: disable=too-many-public-methods
                                                       enc_medium,
                                                       enc_library,
                                                       enc_copy_name,
+                                                      orphan,
                                                       byref(layouts),
                                                       byref(n_layouts),
                                                       sref)
@@ -381,7 +383,7 @@ class Client: # pylint: disable=too-many-public-methods
         if rc:
             raise EnvironmentError(rc, "Failed to add media")
 
-    def medium_delete(self, med_family, med_names, library):
+    def medium_delete(self, med_family, med_names, library, lost):
         """Remove mediums to phobos system."""
         c_id = Id * len(med_names)
         med_ids = [Id(med_family, name=name, library=library)
@@ -391,6 +393,7 @@ class Client: # pylint: disable=too-many-public-methods
         rc = LIBPHOBOS_ADMIN.phobos_admin_media_delete(byref(self.handle),
                                                        c_id(*med_ids),
                                                        len(med_ids),
+                                                       lost,
                                                        byref(count))
         if rc:
             raise EnvironmentError(rc, "Failed to delete media(s) '%s'" %

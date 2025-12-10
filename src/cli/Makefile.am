@@ -9,13 +9,24 @@ EXTRA_DIST=phobos/__init__.py \
 	   phobos/cli/action/__init__.py \
 	   phobos/cli/action/add.py \
 	   phobos/cli/action/clean.py \
+	   phobos/cli/action/clear.py \
 	   phobos/cli/action/create.py \
 	   phobos/cli/action/delete.py \
+	   phobos/cli/action/dump.py \
+	   phobos/cli/action/fair_share.py \
 	   phobos/cli/action/format.py \
+	   phobos/cli/action/get.py \
+	   phobos/cli/action/getmd.py \
 	   phobos/cli/action/list.py \
+	   phobos/cli/action/locate.py \
 	   phobos/cli/action/lock.py \
+	   phobos/cli/action/mput.py \
+	   phobos/cli/action/ping.py \
+	   phobos/cli/action/put.py \
+	   phobos/cli/action/rename.py \
 	   phobos/cli/action/resource_delete.py \
 	   phobos/cli/action/status.py \
+	   phobos/cli/action/undelete.py \
 	   phobos/cli/action/unlock.py \
 	   phobos/cli/common/__init__.py \
 	   phobos/cli/common/args.py \
@@ -29,10 +40,15 @@ EXTRA_DIST=phobos/__init__.py \
 	   phobos/cli/target/extent.py \
 	   phobos/cli/target/lib.py \
 	   phobos/cli/target/lock.py \
+	   phobos/cli/target/logs.py \
 	   phobos/cli/target/media.py \
 	   phobos/cli/target/object.py \
+	   phobos/cli/target/phobosd.py \
+	   phobos/cli/target/sched.py \
+	   phobos/cli/target/store.py \
 	   phobos/cli/target/rados.py \
 	   phobos/cli/target/tape.py \
+	   phobos/cli/target/tlc.py \
 	   phobos/core/__init__.py \
 	   phobos/core/admin.py \
 	   phobos/core/cfg.py \
@@ -67,6 +83,8 @@ EXTRA_DIST=phobos/__init__.py \
 	   phobos/db/sql/2.2/schema.sql \
 	   phobos/db/sql/3.0/drop_schema.sql \
 	   phobos/db/sql/3.0/schema.sql \
+	   phobos/db/sql/3.2/drop_schema.sql \
+	   phobos/db/sql/3.2/schema.sql \
 	   scripts/phobos \
 	   setup.py
 

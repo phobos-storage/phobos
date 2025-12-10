@@ -49,7 +49,7 @@
 #include "resources.h"
 #include "object.h"
 
-#define SCHEMA_INFO "3.0"
+#define SCHEMA_INFO "3.2"
 
 struct dss_result {
     PGresult *pg_res;
@@ -458,17 +458,23 @@ int dss_media_update(struct dss_handle *handle, struct media_info *src_list,
                                             &medium_info);
             if (rc)
                 LOG_GOTO(clean, rc,
-                         "Error on getting medium_info "
-                         "(family %s, name %s, library %s) to update stats",
-                         rsc_family2str(src_list[i].rsc.id.family),
-                         src_list[i].rsc.id.name,
-                         src_list[i].rsc.id.library);
+                         "Error on getting medium_info "FMT_PHO_ID
+                         " to update stats",
+                         PHO_ID(src_list[i].rsc.id));
 
             if (NB_OBJ & fields)
                 medium_info->stats.nb_obj = dst_list[i].stats.nb_obj;
 
             if (NB_OBJ_ADD & fields)
                 medium_info->stats.nb_obj += dst_list[i].stats.nb_obj;
+
+
+            /*
+             * DSS stats values must be positive values even if previous
+             * approximations compute negative values.
+             */
+            if (medium_info->stats.nb_obj < 0)
+                medium_info->stats.nb_obj = 0;
 
             if (LOGC_SPC_USED & fields)
                 medium_info->stats.logc_spc_used =
@@ -478,13 +484,22 @@ int dss_media_update(struct dss_handle *handle, struct media_info *src_list,
                 medium_info->stats.logc_spc_used +=
                     dst_list[i].stats.logc_spc_used;
 
-            if (PHYS_SPC_USED & fields)
+            if (medium_info->stats.logc_spc_used < 0)
+                medium_info->stats.logc_spc_used = 0;
+
+            if (PHYS_SPC_USED & fields) {
                 medium_info->stats.phys_spc_used =
                     dst_list[i].stats.phys_spc_used;
+                if (medium_info->stats.phys_spc_used < 0)
+                    medium_info->stats.phys_spc_used = 0;
+            }
 
-            if (PHYS_SPC_FREE & fields)
+            if (PHYS_SPC_FREE & fields) {
                 medium_info->stats.phys_spc_free =
                     dst_list[i].stats.phys_spc_free;
+                if (medium_info->stats.phys_spc_free < 0)
+                    medium_info->stats.phys_spc_free = 0;
+            }
 
             dst_list[i].stats = medium_info->stats;
             dss_res_free(medium_info, 1);
@@ -573,18 +588,24 @@ int dss_full_layout_get(struct dss_handle *hdl, const struct dss_filter *object,
  */
 
 int dss_extent_get(struct dss_handle *handle, const struct dss_filter *filter,
-                   struct extent **extents, int *extent_count)
+                   struct extent **extents, int *extent_count,
+                   struct dss_sort *sort)
 {
     return dss_generic_get(handle, DSS_EXTENT,
                            (const struct dss_filter*[]) {filter, NULL}, 1,
-                           (void **)extents, extent_count, NULL);
+                           (void **)extents, extent_count, sort);
 }
 
 int dss_extent_insert(struct dss_handle *handle, struct extent *extents,
-                   int extent_count)
+                   int extent_count, enum dss_set_action action)
 {
+    if (action != DSS_SET_INSERT && action != DSS_SET_FULL_INSERT)
+        LOG_RETURN(-ENOTSUP,
+                   "Only actions available for extent insert are normal insert "
+                   "and full insert");
+
     return dss_generic_set(handle, DSS_EXTENT, (void *)extents, extent_count,
-                           DSS_SET_INSERT);
+                           action);
 }
 
 int dss_extent_update(struct dss_handle *handle, struct extent *src_extents,

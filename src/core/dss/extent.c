@@ -112,13 +112,20 @@ out_free:
 static int extent_insert_query(PGconn *conn, void *void_extent, int item_cnt,
                                int64_t fields, GString *request)
 {
-    (void) fields;
-
-    g_string_append(
-        request,
-        "INSERT INTO extent (extent_uuid, state, size, offsetof, "
-        "medium_family, medium_id, medium_library, address, hash, info) VALUES "
-    );
+    if (fields & INSERT_OBJECT)
+        g_string_append(
+            request,
+            "INSERT INTO extent (extent_uuid, state, size, offsetof, "
+            "medium_family, medium_id, medium_library, address, hash, info) "
+            "VALUES "
+        );
+    else
+        g_string_append(
+            request,
+            "INSERT INTO extent (extent_uuid, state, size, offsetof, "
+            "medium_family, medium_id, medium_library, address, hash, info, "
+            "creation_time) VALUES "
+        );
 
     for (int i = 0; i < item_cnt; ++i) {
         struct extent *extent = ((struct extent *) void_extent) + i;
@@ -134,14 +141,31 @@ static int extent_insert_query(PGconn *conn, void *void_extent, int item_cnt,
             return -EINVAL;
         }
 
-        g_string_append_printf(request,
-                               "('%s', '%s', %ld, %ld, '%s', '%s', '%s', '%s', "
-                               "'%s', '%s')",
-                               extent->uuid, extent_state2str(extent->state),
-                               extent->size, extent->offset,
-                               rsc_family2str(extent->media.family),
-                               extent->media.name, extent->media.library,
-                               extent->address.buff, hash, info->str);
+        if (fields & INSERT_OBJECT) {
+            g_string_append_printf(request,
+                                   "('%s', '%s', %ld, %ld, '%s', '%s', '%s', "
+                                   "'%s', '%s', '%s')",
+                                   extent->uuid,
+                                   extent_state2str(extent->state),
+                                   extent->size, extent->offset,
+                                   rsc_family2str(extent->media.family),
+                                   extent->media.name, extent->media.library,
+                                   extent->address.buff, hash, info->str);
+        } else {
+            char creation_time_str[PHO_TIMEVAL_MAX_LEN] = "";
+
+            timeval2str(&extent->creation_time, creation_time_str);
+            g_string_append_printf(request,
+                                   "('%s', '%s', %ld, %ld, '%s', '%s', '%s', "
+                                   "'%s', '%s', '%s', '%s')",
+                                   extent->uuid,
+                                   extent_state2str(extent->state),
+                                   extent->size, extent->offset,
+                                   rsc_family2str(extent->media.family),
+                                   extent->media.name, extent->media.library,
+                                   extent->address.buff, hash, info->str,
+                                   creation_time_str);
+        }
 
         if (i < item_cnt - 1)
             g_string_append(request, ", ");
@@ -187,7 +211,8 @@ static int extent_select_query(GString **conditions, int n_conditions,
 {
     g_string_append(request,
                     "SELECT extent_uuid, size, offsetof, medium_family, state,"
-                    "medium_id, medium_library, address, hash, info FROM "
+                    "medium_id, medium_library, address, hash, info, "
+                    "creation_time FROM "
                     "extent");
 
     if (n_conditions == 1)
@@ -195,6 +220,7 @@ static int extent_select_query(GString **conditions, int n_conditions,
     else if (n_conditions >= 2)
         return -ENOTSUP;
 
+    dss_sort2sql(request, sort);
     g_string_append(request, ";");
 
     return 0;
@@ -302,10 +328,12 @@ static int extent_from_pg_row(struct dss_handle *handle, void *void_extent,
     if (rc)
         return rc;
 
-    rc = pho_json_to_attrs(&extent->info, PQgetvalue(res, row_num, 8));
+    rc = pho_json_to_attrs(&extent->info, PQgetvalue(res, row_num, 9));
     if (rc)
         LOG_RETURN(rc, "Failed to parse json data for extra attrs: %s",
                    json_error.text);
+
+    rc = str2timeval(get_str_value(res, row_num, 10), &extent->creation_time);
 
     return 0;
 }

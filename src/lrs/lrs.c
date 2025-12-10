@@ -272,7 +272,7 @@ static inline void cancel_response(struct resp_container *respc)
 
 static inline bool client_disconnected_error(int rc)
 {
-    return rc == -EPIPE || rc == -ECONNRESET;
+    return rc == -EPIPE || rc == -ECONNRESET || rc == -EBADF;
 }
 
 static int _send_message(struct pho_comm_info *comm,
@@ -479,6 +479,23 @@ static int update_phys_spc_free(struct dss_handle *dss,
 {
     if (written_size > 0) {
         dss_media_info->stats.phys_spc_free -= written_size;
+        /*
+         * Written size could be overstated, especially when media have
+         * automatic compression.
+         *
+         * This value will be correctly updated at sync with ldm_fs_df input.
+         * Meanwhile, we set 0 instead of an inaccurate negative value.
+         */
+        if (dss_media_info->stats.phys_spc_free < 0) {
+            pho_debug("Update negative phys_spc_free %zd of medium "
+                      "(family '%s', name '%s', library '%s') is set to zero",
+                      dss_media_info->stats.phys_spc_free,
+                      rsc_family2str(dss_media_info->rsc.id.family),
+                      dss_media_info->rsc.id.name,
+                      dss_media_info->rsc.id.library);
+            dss_media_info->stats.phys_spc_free = 0;
+        }
+
         return dss_media_update(dss, dss_media_info, dss_media_info, 1,
                                 PHYS_SPC_FREE);
     }
@@ -525,19 +542,18 @@ static int release_medium(struct lrs_sched *sched,
     if (release->rc == 0)
         rc = update_phys_spc_free(comm_dss, dev->ld_dss_media_info,
                                   release->size_written);
+    if (release->to_sync)
+        /* ownership of reqc is passed to the device thread */
+        push_new_sync_to_device(dev, reqc, medium_index);
 
     /* Acknowledgement of the request */
     dev->ld_ongoing_io = false;
-    if (dev->ld_ongoing_grouping.grouping) {
+    if (dev->ld_ongoing_grouping.grouping && !reqc->req->release->partial) {
         free(dev->ld_ongoing_grouping.grouping);
         dev->ld_ongoing_grouping.grouping = NULL;
     }
 
     MUTEX_UNLOCK(&dev->ld_mutex);
-
-    if (release->to_sync)
-        /* ownership of reqc is passed to the device thread, no free here */
-        push_new_sync_to_device(dev, reqc, medium_index);
 
     return rc;
 }

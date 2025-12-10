@@ -93,6 +93,7 @@ class DSSLock(Structure): # pylint: disable=too-few-public-methods
         ('_lock_hostname', c_char_p),
         ('lock_owner', c_int),
         ('lock_ts', Timeval),
+        ('last_locate', Timeval),
         ('lock_is_early', c_bool),
     ]
 
@@ -640,6 +641,7 @@ class ObjectInfo(Structure, CLIManagedResourceMixin):
         ('creation_time', Timeval),
         ('deprec_time', Timeval),
         ('_grouping', c_char_p),
+        ('size', c_ssize_t),
     ]
 
     def get_display_fields(self, max_width):
@@ -652,6 +654,7 @@ class ObjectInfo(Structure, CLIManagedResourceMixin):
             'user_md': (lambda obj, width=max_width: truncate_user_md(obj,
                                                                       width)),
             'grouping': None,
+            'size': None,
         }
 
     @property
@@ -710,6 +713,7 @@ class DeprecatedObjectInfo(ObjectInfo):
             'creation_time': Timeval.to_string,
             'deprec_time': Timeval.to_string,
             'grouping': None,
+            'size': None,
         }
 
 class CopyInfo(Structure, CLIManagedResourceMixin):
@@ -794,7 +798,8 @@ class ExtentInfo(Structure): # pylint: disable=too-few-public-methods
         ('xxh128', c_ubyte * 16),
         ('with_md5', c_bool),
         ('md5', c_ubyte * MD5_BYTE_LENGTH),
-        ('info', PhoAttrs)
+        ('info', PhoAttrs),
+        ('creation_time', Timeval),
     ]
 
 class ModuleDesc(Structure): # pylint: disable=too-few-public-methods
@@ -844,6 +849,8 @@ class LayoutInfo(Structure, CLIManagedResourceMixin):
             'md5': None,
             'library': None,
             'copy_name': None,
+            'creation_time':
+                (lambda seq_t: str([Timeval.to_string(t) for t in seq_t])),
         }
 
     def get_sort_fields(self): # pylint: disable=no-self-use
@@ -942,6 +949,11 @@ class LayoutInfo(Structure, CLIManagedResourceMixin):
     def layout(self):
         """Wrapper to get object layout."""
         return self.layout_desc.mod_name
+
+    @property
+    def creation_time(self):
+        """Wrapper to get extent creation time"""
+        return [self.extents[i].creation_time for i in range(self.ext_count)]
 
 class PhoLogRec(Structure):
     """Single log record."""
@@ -1074,6 +1086,7 @@ class DriveStatus(CLIManagedResourceMixin): #pylint: disable=too-many-instance-a
         self.media = values.get("media", "")
         self.ongoing_io = values.get("ongoing_io", "")
         self.currently_dedicated_to = values.get("currently_dedicated_to", "")
+        self.adm_status = values.get("adm_status")
 
     def get_display_fields(self, max_width=None):
         """Return a dict of available fields and optional display formatters."""
@@ -1087,4 +1100,5 @@ class DriveStatus(CLIManagedResourceMixin): #pylint: disable=too-many-instance-a
             'media': None,
             'ongoing_io': None,
             'currently_dedicated_to': None,
+            'adm_status': None,
         }

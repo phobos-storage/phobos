@@ -50,7 +50,7 @@ Initialize postgresql directories:
 ```
 
 Edit `/var/lib/pgsql/9.4/data/pg_hba.conf` to authorize access from phobos host
-(localhost in this example):
+(localhost in this example, change it if your network is a different one):
 ```
 # "local" is for Unix domain socket connections only
 local   all             all                                     trust
@@ -59,6 +59,10 @@ host    all             all             127.0.0.1/32            md5
 # IPv6 local connections:
 host    all             all             ::1/128                 md5
 ```
+
+If your phobos host is on an other node than your postgresql server, you must
+change the `listen_adresses` option of the `/var/lib/pgsql/data/postgresql.conf`
+from `localhost` to the good one matching your needs.
 
 Start the database server:
 ```
@@ -107,9 +111,31 @@ sudo -u postgres phobos_db setup_db -s
 ```
 
 ## First steps
-### Launching phobosd
-To use phobos, a daemon called phobosd needs to be launched. It mainly manages
+
+To use Phobos, you must start a daemon called `phobosd`, which mainly manages
 the drive/media allocation and sets up resources to read or write your data.
+One must be started on each node that may access drives/media.
+
+Moreover, if you want to use tapes in your system, you must start another daemon
+called `phobos_tlc` (Tape Library Controller) before the `phobosd`. You must
+start one `phobos_tlc` per tape library. Each `phobos_tlc` daemon must be
+started on a node that has an access to manage the corresponding tape library.
+`phobos_tlc` needs to be launched before any `phobosd` that will use this tape
+library.
+
+### Launching phobos_tlc
+
+On the node that has access to the tape library management device, you must
+set the `lib_device` option of the corresponding `tlc` configuration section
+into /etc/phobos.conf . (The default of the installed template is `/dev/changer`
+for the default `legacy` tape library.)
+
+To launch/stop the daemon:
+```
+# systemctl start/stop phobos_tlc
+```
+
+### Launching phobosd
 
 To launch/stop the daemon:
 ```

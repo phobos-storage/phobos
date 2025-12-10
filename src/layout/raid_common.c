@@ -29,6 +29,7 @@
 #include <openssl/evp.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/time.h>
 #include <unistd.h>
 #ifdef HAVE_XXH128
 #include <xxhash.h>
@@ -61,7 +62,6 @@ static void free_extent_address_buff(void *void_extent)
 
     free(extent->address.buff);
 }
-
 
 int raid_encoder_init(struct pho_data_processor *encoder,
                       const struct module_desc *module,
@@ -254,6 +254,10 @@ void raid_writer_processor_destroy(struct pho_data_processor *proc)
 
         io_context->write.written_extents = NULL;
         io_context->write.to_release_media = NULL;
+        for (j = 0; j < n_total_extents(io_context); ++j) {
+            free(io_context->write.extents[j].uuid);
+            free(io_context->write.extents[j].address.buff);
+        }
         free(io_context->write.extents);
         free(io_context->iods);
         g_string_free(io_context->write.user_md, TRUE);
@@ -442,6 +446,13 @@ static void raid_writer_build_allocation_req(struct pho_data_processor *proc,
     req->walloc->no_split = put_params->no_split;
 }
 
+/* The older a ctime is, the higher its priority. */
+static inline int64_t priority_from_ctime(struct timeval copy_ctime)
+{
+   return -((int64_t)copy_ctime.tv_sec * (int64_t)1000000 +
+            (int64_t)copy_ctime.tv_usec);
+}
+
 /** Generate the next read or delete allocation request for this eraser */
 static void raid_reader_eraser_build_allocation_req(
     struct pho_data_processor *proc, pho_req_t *req, enum processor_type type)
@@ -454,6 +465,10 @@ static void raid_reader_eraser_build_allocation_req(
     ENTRY;
 
     pho_srl_request_read_alloc(req, n_extents);
+    req->has_qos = true;
+    req->qos = 0;
+    req->has_priority = true;
+    req->priority = priority_from_ctime(proc->src_copy_ctime);
     req->ralloc->n_required =
         is_eraser(proc) ? n_extents : io_context->n_data_extents;
     req->ralloc->operation =
@@ -939,6 +954,7 @@ int raid_reader_processor_step(struct pho_data_processor *proc,
                                size_t *n_reqs)
 {
     struct raid_io_context *io_context = proc->private_reader;
+    bool stop_io = false;
     bool need_new_alloc;
     bool need_release;
     bool split_ended;
@@ -973,6 +989,12 @@ int raid_reader_processor_step(struct pho_data_processor *proc,
             goto release;
     }
 
+    if (proc->xfer->xd_targets[proc->current_target].xt_rc != 0) {
+        stop_io = true;
+        rc = proc->xfer->xd_targets[proc->current_target].xt_rc;
+        goto release;
+    }
+
     /* read */
     if (!proc->buff.size)
         return 0;
@@ -986,6 +1008,9 @@ int raid_reader_processor_step(struct pho_data_processor *proc,
     if (split_ended)
         rc = raid_reader_split_fini(proc);
 
+    if (rc && !proc->xfer->xd_targets[proc->current_target].xt_rc)
+        proc->xfer->xd_targets[proc->current_target].xt_rc = rc;
+
 release:
     need_release = rc || split_ended;
     need_new_alloc = !rc && split_ended &&
@@ -997,14 +1022,14 @@ release:
             *reqs = xcalloc(1, sizeof(**reqs));
     }
 
-    if (rc || split_ended) {
+    if (need_release) {
         pho_srl_request_release_alloc(*reqs + *n_reqs,
                                       io_context->read.resp->ralloc->n_media,
                                       true);
         for (i = 0; i < io_context->read.resp->ralloc->n_media; i++) {
             rsc_id_cpy((*reqs)[*n_reqs].release->media[i]->med_id,
                        io_context->read.resp->ralloc->media[i]->med_id);
-            (*reqs)[*n_reqs].release->media[i]->rc = rc;
+            (*reqs)[*n_reqs].release->media[i]->rc = stop_io ? 0 : rc;
             (*reqs)[*n_reqs].release->media[i]->to_sync = false;
         }
 
@@ -1019,6 +1044,34 @@ release:
    }
 
    return rc;
+}
+
+static int prepare_writer_release_request(struct pho_data_processor *proc,
+                                          pho_resp_t *new_resp)
+{
+    int rc;
+    int i;
+
+    rc = clock_gettime(CLOCK_REALTIME, &proc->writer_start_req);
+    if (rc)
+        LOG_RETURN(-errno, "clock_gettime: unable to get CLOCK_REALTIME");
+
+    if (!pho_response_is_partial_release(new_resp)) {
+        write_resp_destroy(proc);
+        proc->write_resp = copy_response_write_alloc(new_resp);
+    }
+
+    /* prepare release and potential next alloc */
+    proc->writer_release_alloc =
+        xcalloc(2, sizeof(*proc->writer_release_alloc));
+    pho_srl_request_release_alloc(proc->writer_release_alloc,
+                                  proc->write_resp->walloc->n_media, false);
+    for (i = 0; i < proc->write_resp->walloc->n_media; i++) {
+        rsc_id_cpy(proc->writer_release_alloc->release->media[i]->med_id,
+                   proc->write_resp->walloc->media[i]->med_id);
+    }
+
+    return 0;
 }
 
 static int raid_writer_split_setup(struct pho_data_processor *proc,
@@ -1036,28 +1089,6 @@ static int raid_writer_split_setup(struct pho_data_processor *proc,
     int i;
 
     ENTRY;
-
-    if (new_resp) {
-        rc = clock_gettime(CLOCK_REALTIME, &proc->writer_start_req);
-        if (rc)
-            LOG_RETURN(-errno, "clock_gettime: unable to get CLOCK_REALTIME");
-
-        if (!pho_response_is_partial_release(new_resp)) {
-            write_resp_destroy(proc);
-            proc->write_resp = copy_response_write_alloc(new_resp);
-        }
-
-
-        /* prepare release and potential next alloc */
-        proc->writer_release_alloc =
-            xcalloc(2, sizeof(*proc->writer_release_alloc));
-        pho_srl_request_release_alloc(proc->writer_release_alloc,
-                                      proc->write_resp->walloc->n_media, false);
-        for (i = 0; i < proc->write_resp->walloc->n_media; i++) {
-            rsc_id_cpy(proc->writer_release_alloc->release->media[i]->med_id,
-                       proc->write_resp->walloc->media[i]->med_id);
-        }
-    }
 
     wresp = proc->write_resp->walloc;
     n_extents = n_total_extents(io_context);
@@ -1202,6 +1233,17 @@ static void raid_writer_split_close(struct pho_data_processor *proc, int *rc)
                 break;
             }
 
+            rc2 = gettimeofday(&io_context->write.extents[i].creation_time,
+                               NULL);
+            if (rc2) {
+                i++;
+                *rc = rc2;
+                pho_error(*rc,
+                          "raid: unable to get ctime of extent %d for '%s'", i,
+                          proc->xfer->xd_targets[target].xt_objid);
+                break;
+            }
+
             raid_io_add_written_extent(io_context,
                                        &io_context->write.extents[i]);
 
@@ -1219,6 +1261,39 @@ static void raid_writer_split_close(struct pho_data_processor *proc, int *rc)
         io_context->current_split++;
         io_context->current_split_offset = proc->writer_offset;
     }
+}
+
+static int raid_writer_handle_partial_release_resp(
+    struct pho_data_processor *encoder,
+    pho_resp_release_t *rel_resp
+)
+{
+    struct raid_io_context *io_context;
+    int rc = 0;
+    int i, j;
+
+    for (i = 0; i < encoder->current_target; i++) {
+        io_context =
+            &((struct raid_io_context *) encoder->private_writer)[i];
+
+        if (io_context->write.released)
+            continue;
+
+        encoder->dest_layout[i].ext_count =
+            io_context->write.written_extents->len;
+        encoder->dest_layout[i].extents = (struct extent *)
+            g_array_free(io_context->write.written_extents, FALSE);
+
+        io_context->write.written_extents = NULL;
+        io_context->write.n_released_media = 0;
+
+        for (j = 0; j < encoder->dest_layout->ext_count; ++j)
+            encoder->dest_layout[i].extents[j].state = PHO_EXT_ST_SYNC;
+
+        io_context->write.released = true;
+    }
+
+    return rc;
 }
 
 static int raid_writer_handle_release_resp(struct pho_data_processor *encoder,
@@ -1299,7 +1374,8 @@ static int raid_writer_handle_release_resp(struct pho_data_processor *encoder,
 
 static void complete_and_transfer_release(struct pho_data_processor *proc,
                                           int rc, pho_req_t **reqs,
-                                          size_t *n_reqs)
+                                          size_t *n_reqs,
+                                          bool stop_io)
 {
     pho_req_release_t *release_req = proc->writer_release_alloc->release;
     int i;
@@ -1307,8 +1383,8 @@ static void complete_and_transfer_release(struct pho_data_processor *proc,
     ENTRY;
 
     for (i = 0; i < proc->write_resp->walloc->n_media; i++) {
-        release_req->media[i]->rc = rc;
-        if (rc) {
+        release_req->media[i]->rc = stop_io ? 0 : rc;
+        if (rc || stop_io) {
             release_req->media[i]->to_sync = false;
         } else {
             release_req->media[i]->to_sync = true;
@@ -1339,6 +1415,7 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
     bool need_new_alloc = false;
     bool target_ended = false;
     bool split_ended = false;
+    bool stop_io = false;
     int rc = 0;
     int i;
 
@@ -1351,42 +1428,68 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
         rc = xfer_remain_to_write_per_medium(
                  proc, &all_target_remain_to_write_per_medium);
         if (rc)
-            return rc;
+            goto set_target_rc;
 
         *reqs = xcalloc(1, sizeof(**reqs));
         *n_reqs = 1;
         raid_writer_build_allocation_req(proc, *reqs,
                                          all_target_remain_to_write_per_medium);
-        return 0;
+        goto set_target_rc;
     }
 
     /* manage error */
     if (resp && pho_response_is_error(resp)) {
         proc->xfer->xd_rc = resp->error->rc;
         proc->done = true;
-        LOG_RETURN(proc->xfer->xd_rc,
-                   "%s %d received error %s to last request",
-                   processor_type2str(proc), resp->req_id,
-                   pho_srl_error_kind_str(resp->error));
-
+        LOG_GOTO(set_target_rc, rc = proc->xfer->xd_rc,
+                 "%s %d received error %s to last request",
+                 processor_type2str(proc), resp->req_id,
+                 pho_srl_error_kind_str(resp->error));
     }
 
     /* manage release */
-    if (resp && pho_response_is_release(resp) &&
-        !pho_response_is_partial_release(resp))
-        return raid_writer_handle_release_resp(proc, resp->release);
-
-    /* manage received allocation and partial release */
-    if (resp) {
-        rc = raid_writer_split_setup(proc, resp);
-        if (rc) {
-           return rc;
+    if (resp && pho_response_is_release(resp)) {
+        if (pho_response_is_partial_release(resp)) {
+            rc = raid_writer_handle_partial_release_resp(proc, resp->release);
+            if (rc)
+                goto set_target_rc;
+        } else {
+            rc = raid_writer_handle_release_resp(proc, resp->release);
+            goto set_target_rc;
         }
     }
 
+    /* manage received allocation and partial release */
+    if (resp) {
+        rc = prepare_writer_release_request(proc, resp);
+        if (rc)
+            goto set_target_rc;
+
+        if (pho_response_is_partial_release(resp)) {
+            struct phobos_global_context *context = phobos_context();
+
+            if (context->mocks.mock_failure_after_second_partial_release !=
+                    NULL)
+                rc = context->mocks.mock_failure_after_second_partial_release();
+        } else {
+            rc = raid_writer_split_setup(proc, resp);
+        }
+
+        if (rc)
+            goto check_for_release;
+    }
+
+    if (proc->xfer->xd_targets[proc->current_target].xt_rc != 0) {
+        stop_io = true;
+        rc = proc->xfer->xd_targets[proc->current_target].xt_rc;
+        goto check_for_release;
+    }
+
     /* write */
-    if (!proc->buff.size)
-        return 0;
+    if (!proc->buff.size) {
+        rc = 0;
+        goto set_target_rc;
+    }
 
     rc = io_context->ops->write_from_buff(proc);
 
@@ -1410,6 +1513,7 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
         }
     }
 
+check_for_release:
     need_full_release = rc || ((split_ended && !target_ended) ||
                           need_alloc_for_next_target || last_target_ended);
 
@@ -1426,7 +1530,7 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
                                             proc->write_resp);
 
     if (need_full_release || need_partial_release)
-        complete_and_transfer_release(proc, rc, reqs, n_reqs);
+        complete_and_transfer_release(proc, rc, reqs, n_reqs, stop_io);
 
     if (need_partial_release)
         (*reqs)[*n_reqs - 1].release->partial = true;
@@ -1451,6 +1555,15 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
         raid_writer_build_allocation_req(proc, *reqs + *n_reqs,
                                          all_target_remain_to_write_per_medium);
         (*n_reqs)++;
+    }
+
+set_target_rc:
+    if (rc) {
+        if (proc->xfer->xd_rc == 0)
+            proc->xfer->xd_rc = rc;
+
+        for (i = proc->current_target; i < proc->xfer->xd_ntargets; i++)
+            proc->xfer->xd_targets[i].xt_rc = rc;
     }
 
     return rc;
@@ -1729,4 +1842,23 @@ log_err:
     LOG_RETURN(-EINVAL,
                "Hash mismatch: the data in the extent %s/%s has been corrupted",
                extent->media.name, extent->address.buff);
+}
+
+int get_object_size_from_layout(struct layout_info *layout)
+{
+    const char *buffer;
+    int object_size;
+
+    buffer = pho_attr_get(&layout->layout_desc.mod_attrs,
+                          PHO_EA_OBJECT_SIZE_NAME);
+    if (buffer == NULL)
+        LOG_RETURN(-EINVAL, "Failed to get object size of object '%s'",
+                   layout->oid);
+
+    object_size = str2int64(buffer);
+    if (object_size < 0)
+        LOG_RETURN(-EINVAL, "Failed to convert '%s' to size for object '%s'",
+                   layout->oid, buffer);
+
+    return object_size;
 }

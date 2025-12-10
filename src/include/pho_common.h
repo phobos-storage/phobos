@@ -143,7 +143,7 @@ do {                                                                    \
 #define xstrdup(str)                    XWRAPPER(strdup, str)
 #define xstrndup(str, n)                XWRAPPER(strndup, str, n)
 #define xrealloc(ptr, size)             XWRAPPER(realloc, ptr, size)
-#define xstrdup_safe(str)               ({ str ? xstrdup(str) : NULL; })
+#define xstrdup_safe(str)               ({ (str) ? xstrdup(str) : NULL; })
 
 /* This attribute allows functions redefined in tests to have higher priority
  * when the linker chooses which one to use in the final executable.
@@ -613,7 +613,26 @@ struct mock_ltfs {
 /**
  * Callback function to mock an ioctl call as used in the SCSI library module
  */
-typedef int (*mock_ioctl_t)(int fd, unsigned long request, void *sg_io_hdr);
+typedef int (*mock_ioctl_t)(int fd, unsigned long request, ...);
+
+/**
+ * Structure containing functions mocked by the tests. For testing purposes
+ * only.
+ */
+struct mocking_functions {
+    /** LTFS mocking functions used by the module "ldm_fs_ltfs".  */
+    struct mock_ltfs mock_ltfs;
+
+    /** Callback to mock the ioctl call used by the ldm module "ldm_lib_scsi" to
+     * interact with the tape library.
+     */
+    mock_ioctl_t mock_ioctl;
+
+    /** Callback to generate an error in multi-put with partial releases
+     * settings.
+     */
+    int (*mock_failure_after_second_partial_release)(void);
+};
 
 /**
  * Structure containing global information about Phobos. This structure is
@@ -623,6 +642,9 @@ typedef int (*mock_ioctl_t)(int fd, unsigned long request, void *sg_io_hdr);
  * thread safe.
  */
 struct phobos_global_context {
+    /** Number of references of this global context */
+    int pgc_refcount;
+
     /** Content of Phobos' configuration file */
     struct config config;
     /** Minimum level of logs to display */
@@ -638,21 +660,13 @@ struct phobos_global_context {
      */
     struct pho_cache *lrs_media_cache[PHO_RSC_LAST];
 
-    /* /!\ The following fields are for testing purposes only /!\ */
-
-    /** LTFS mocking functions used by the module "ldm_fs_ltfs".  */
-    struct mock_ltfs mock_ltfs;
-    /** Callback to mock the ioctl call used by the ldm module "ldm_lib_scsi" to
-     * interact with the tape library.
-     */
-    mock_ioctl_t mock_ioctl;
+    /* /!\ The following field is for testing purposes only /!\ */
+    struct mocking_functions mocks;
 };
 
 /**
  * Initialize the phobos_global_context structure. Must be called before any
  * other phobos function or module loading routine.
- *
- * /!\ Not thread safe
  */
 int pho_context_init(void);
 
@@ -660,8 +674,6 @@ int pho_context_init(void);
  * Release the phobos_global_context structure. Once called, no phobos function
  * or module loading routine should be called unless pho_context_init is called
  * again.
- *
- * /!\ Not thread safe
  */
 void pho_context_fini(void);
 
@@ -687,9 +699,7 @@ struct phobos_global_context *phobos_context(void);
  */
 void phobos_module_context_set(struct phobos_global_context *context);
 
-void pho_context_reset_scsi_ioctl(void);
-
-void pho_context_reset_mock_ltfs_functions(void);
+void pho_context_reset_mock_functions(void);
 
 /**
  * Generate a unparsed UUID and return it as a string

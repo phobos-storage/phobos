@@ -67,11 +67,13 @@ gboolean g_pho_id_equal(gconstpointer p_pho_id_1, gconstpointer p_pho_id_2)
 }
 
 void init_pho_lock(struct pho_lock *lock, char *hostname, int owner,
-                   struct timeval *timestamp, bool is_early)
+                   struct timeval *timestamp, struct timeval *last_locate,
+                   bool is_early)
 {
     lock->hostname = xstrdup_safe(hostname);
     lock->owner = owner;
     lock->timestamp = *timestamp;
+    lock->last_locate = *last_locate;
     lock->is_early = is_early;
 }
 
@@ -80,6 +82,8 @@ void pho_lock_cpy(struct pho_lock *lock_dst, const struct pho_lock *lock_src)
     lock_dst->hostname = xstrdup_safe(lock_src->hostname);
     lock_dst->owner = lock_src->owner;
     lock_dst->timestamp = lock_src->timestamp;
+    lock_dst->last_locate = lock_src->last_locate;
+    lock_dst->is_early = lock_src->is_early;
 }
 
 void pho_lock_clean(struct pho_lock *lock)
@@ -158,6 +162,7 @@ void media_info_cleanup(struct media_info *medium)
     pho_lock_clean(&medium->lock);
     free(medium->rsc.model);
     string_array_free(&medium->tags);
+    string_array_free(&medium->groupings);
 }
 
 void media_info_free(struct media_info *mda)
@@ -168,6 +173,7 @@ void media_info_free(struct media_info *mda)
     pho_lock_clean(&mda->lock);
     free(mda->rsc.model);
     string_array_free(&mda->tags);
+    string_array_free(&mda->groupings);
     free(mda);
 }
 
@@ -193,6 +199,11 @@ struct object_info *object_info_dup(const struct object_info *obj)
     /* timeval deprec_time */
     obj_out->deprec_time = obj->deprec_time;
 
+    /* dup grouping */
+    obj_out->grouping = xstrdup_safe(obj->grouping);
+
+    obj_out->size = obj->size;
+
     /* success */
     return obj_out;
 }
@@ -205,6 +216,7 @@ void object_info_free(struct object_info *obj)
     free(obj->oid);
     free(obj->uuid);
     free(obj->user_md);
+    free((void *)obj->grouping);
     free(obj);
 }
 
@@ -218,6 +230,7 @@ struct copy_info *copy_info_dup(const struct copy_info *copy)
     copy_out->version = copy->version;
     copy_out->copy_name = xstrdup_safe(copy->copy_name);
     copy_out->copy_status = copy->copy_status;
+    copy_out->creation_time = copy->creation_time;
 
     return copy_out;
 }
@@ -393,15 +406,24 @@ void str2string_array(const char *str, struct string_array *string_array)
     free(parse_str);
 }
 
-int str2timeval(const char *tv_str, struct timeval *tv)
+static int any_str2timeval(const char *format, const char *tv_str,
+                           struct timeval *tv)
 {
     struct tm tmp_tm = {0};
     char *usec_ptr;
 
-    usec_ptr = strptime(tv_str, "%Y-%m-%d %T", &tmp_tm);
+    if (tv_str == NULL || !strcmp(tv_str, "")) {
+        tv->tv_sec = 0;
+        tv->tv_usec = 0;
+
+        return 0;
+    }
+
+    usec_ptr = strptime(tv_str, format, &tmp_tm);
     if (!usec_ptr)
         LOG_RETURN(-EINVAL, "Object timestamp '%s' is not well formatted",
                    tv_str);
+
     tv->tv_sec = mktime(&tmp_tm);
     tv->tv_usec = 0;
     if (*usec_ptr == '.') {
@@ -411,6 +433,16 @@ int str2timeval(const char *tv_str, struct timeval *tv)
     }
 
     return 0;
+}
+
+int str2timeval(const char *tv_str, struct timeval *tv)
+{
+    return any_str2timeval("%Y-%m-%d %T", tv_str, tv);
+}
+
+int json_agg_str2timeval(const char *tv_str, struct timeval *tv)
+{
+    return any_str2timeval("%Y-%m-%dT%T", tv_str, tv);
 }
 
 void timeval2str(const struct timeval *tv, char *tv_str)

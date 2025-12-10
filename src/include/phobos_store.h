@@ -25,6 +25,19 @@
 #ifndef _PHO_STORE_H
 #define _PHO_STORE_H
 
+#define __PHOBOS_MAJOR__ PHOBOS_MAJOR
+#define __PHOBOS_MINOR__ PHOBOS_MINOR
+#define __PHOBOS_PATCH__ PHOBOS_PATCH
+
+#define __PHOBOS_PREREQ(maj, min) \
+    (__PHOBOS_MAJOR__ > (maj) || \
+    (__PHOBOS_MAJOR__ == (maj) && __PHOBOS_MINOR__ >= (min)))
+
+#define __PHOBOS_PREREQ_PATCH(maj, min, patch) \
+    (__PHOBOS_PREREQ((maj), (min)) || \
+    (__PHOBOS_MAJOR__ == (maj) && __PHOBOS_MINOR__ == (min) && \
+        __PHOBOS_PATCH__ >= (patch)))
+
 #include "pho_attrs.h"
 #include "pho_types.h"
 #include "pho_dss.h"
@@ -79,7 +92,7 @@ static const char * const xfer_op_names[] = {
     [PHO_XFER_OP_GETMD] = "GETMD",
     [PHO_XFER_OP_DEL]   = "DELETE",
     [PHO_XFER_OP_UNDEL] = "UNDELETE",
-    [PHO_XFER_OP_COPY] = "COPY",
+    [PHO_XFER_OP_COPY]  = "COPY",
 };
 
 static inline const char *xfer_op2str(enum pho_xfer_op op)
@@ -99,7 +112,11 @@ static inline const char *xfer_op2str(enum pho_xfer_op op)
  */
 struct pho_xfer_put_params {
     enum rsc_family  family;      /**< Targeted resource family. */
-    const char      *grouping;    /**< Grouping attached to the new object. */
+    const char      *grouping;    /**< Grouping attached to the new object.
+                                    *  For a new copy of an existing object,
+                                    *  we can't set a new grouping. Grouping
+                                    *  of the pre-existing object is used.
+                                    */
     const char      *library;     /**< Targeted library (If NULL, any available
                                     *  library can be selected.)
                                     */
@@ -138,7 +155,7 @@ struct pho_xfer_get_params {
  * hard deleted.
  */
 struct pho_xfer_del_params {
-    char *copy_name;           /**< Copy name [out] */
+    char *copy_name;           /**< Copy name input PHO_XFER_COPY_HARD_DEL */
     enum dss_obj_scope scope;  /**< Scope of the object to delete
                                  *  (alive, deprecated, ...).
                                  */
@@ -167,10 +184,11 @@ union pho_xfer_params {
  * The source/destination semantics of the fields vary
  * depending on the nature of the operation.
  * See below:
- *  - pĥobos_getmd()
+ *  - phobos_getmd()
  *  - phobos_get()
  *  - phobos_put()
  *  - phobos_undelete()
+ *  - phobos_copy()
  */
 struct pho_xfer_desc {
     enum pho_xfer_op        xd_op;       /**< Operation to perform. */
@@ -188,6 +206,7 @@ struct pho_xfer_target {
     int               xt_fd;      /**< FD of the source/destination. */
     struct pho_attrs  xt_attrs;   /**< User defined attributes. */
     ssize_t           xt_size;    /**< Amount of data to write. */
+    int               xt_rc;      /**< Outcome for this target's xfer. */
 };
 
 /**

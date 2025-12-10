@@ -49,7 +49,8 @@ gboolean g_pho_id_equal(gconstpointer p_pho_id_1, gconstpointer p_pho_id_2);
 
 /** initialize a pho_lock structure */
 void init_pho_lock(struct pho_lock *lock, char *hostname, int owner,
-                   struct timeval *lock_timestamp, bool is_early);
+                   struct timeval *lock_timestamp, struct timeval *last_locate,
+                   bool is_early);
 
 /** copy a pho_lock structure */
 void pho_lock_cpy(struct pho_lock *lock_dst, const struct pho_lock *lock_src);
@@ -156,6 +157,16 @@ void str2string_array(const char *str, struct string_array *string_array);
  * @return               0 on success, -EINVAL on error
  */
 int str2timeval(const char *tv_str, struct timeval *tv);
+
+/**
+ * Convert a string of the form "YYYY-mm-ddTHH:MM:SS.uuuuuu" into a
+ * timeval structure
+ *
+ * @param[in]     tv_str the string to extract the time from
+ * @param[in,out] tv     the extracted time, must be pre-allocated
+ * @return               0 on success, -EINVAL on error
+ */
+int json_agg_str2timeval(const char *tv_str, struct timeval *tv);
 
 /**
  * Convert a timeval structure into a string of the form

@@ -40,6 +40,8 @@ static struct extent EXT = {
     .address.buff = "blablabla",
     .with_xxh128 = false,
     .with_md5 = false,
+    .creation_time.tv_sec = 0,
+    .creation_time.tv_usec = 0,
 };
 
 static int de_simple_setup(void **state)
@@ -48,7 +50,7 @@ static int de_simple_setup(void **state)
     int rc;
 
     /* insert the extent */
-    rc = dss_extent_insert(handle, &EXT, 1);
+    rc = dss_extent_insert(handle, &EXT, 1, DSS_SET_INSERT);
     if (rc)
         return -1;
 
@@ -65,7 +67,7 @@ static void de_simple_ok(void **state)
     int rc;
 
     /* retrieve the extent */
-    rc = dss_extent_get(handle, NULL, &ext_res, &ext_cnt);
+    rc = dss_extent_get(handle, NULL, &ext_res, &ext_cnt, NULL);
     assert_return_code(rc, -rc);
     assert_int_equal(ext_cnt, 1);
     assert_int_equal(ext_res->state, PHO_EXT_ST_PENDING);
@@ -88,7 +90,7 @@ static void de_simple_ok(void **state)
     dss_res_free(ext_res, ext_cnt);
 
     /* retrieve and verify the information */
-    rc = dss_extent_get(handle, NULL, &ext_res, &ext_cnt);
+    rc = dss_extent_get(handle, NULL, &ext_res, &ext_cnt, NULL);
     assert_return_code(rc, -rc);
     assert_int_equal(ext_cnt, 1);
     assert_int_equal(ext_res->state, PHO_EXT_ST_SYNC);

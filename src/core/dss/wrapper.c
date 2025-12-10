@@ -97,25 +97,22 @@ int dss_one_medium_get_from_id(struct dss_handle *dss,
                           medium_id->name, medium_id->library);
     if (rc)
         LOG_RETURN(rc,
-                   "Unable to build filter for media family %s, name %s and "
-                   "library %s", rsc_family2str(medium_id->family),
-                   medium_id->name, medium_id->library);
+                   "Unable to build filter for media "FMT_PHO_ID,
+                   PHO_ID(*medium_id));
 
     rc = dss_media_get(dss, &filter, medium_info, &cnt, NULL);
     dss_filter_free(&filter);
     if (rc)
         LOG_RETURN(rc,
-                   "Error while getting medium info for family %s, name %s "
-                   "and library %s", rsc_family2str(medium_id->family),
-                   medium_id->name, medium_id->library);
+                   "Error while getting medium info "FMT_PHO_ID,
+                   PHO_ID(*medium_id));
 
     /* (family, id) is the primary key of the media table */
     assert(cnt <= 1);
 
     if (cnt == 0) {
-        pho_warn("Medium (family %s, name %s, library %s) is absent from media "
-                 "table", rsc_family2str(medium_id->family), medium_id->name,
-                 medium_id->library);
+        pho_warn("Medium "FMT_PHO_ID" is absent from media "
+                 "table", PHO_ID(*medium_id));
         dss_res_free(*medium_info, cnt);
         return(-ENOENT);
     }
@@ -136,17 +133,13 @@ int dss_medium_locate(struct dss_handle *dss, const struct pho_id *medium_id,
 
     /* check ADMIN STATUS to see if the medium is available */
     if (medium_info->rsc.adm_status != PHO_RSC_ADM_ST_UNLOCKED) {
-        pho_warn("Medium (family %s, name %s, library %s) is admin locked",
-                 rsc_family2str(medium_id->family), medium_id->name,
-                 medium_id->library);
+        pho_warn("Medium "FMT_PHO_ID" is admin locked", PHO_ID(*medium_id));
         GOTO(clean, rc = -EACCES);
     }
 
     if (!medium_info->flags.get) {
-        pho_warn("Get are prevented by operation flag on this medium "
-                 "(family %s, name %s, library %s)",
-                 rsc_family2str(medium_id->family), medium_id->name,
-                 medium_id->library);
+        pho_warn("Get are prevented by operation flag on this "
+                 "medium "FMT_PHO_ID, PHO_ID(*medium_id));
         GOTO(clean, rc = -EPERM);
     }
 
@@ -517,10 +510,10 @@ int dss_move_object_to_deprecated(struct dss_handle *handle,
                            "WITH moved_object AS"
                            " (DELETE FROM object WHERE %s RETURNING"
                            "  oid, object_uuid, version, user_md,"
-                           "  creation_time)"
+                           "  creation_time, size)"
                            " INSERT INTO deprecated_object"
                            "  (oid, object_uuid, version, user_md,"
-                           "   creation_time)"
+                           "   creation_time, size)"
                            " SELECT * FROM moved_object",
                            oid_list->str);
 
@@ -596,9 +589,9 @@ int dss_move_deprecated_to_object(struct dss_handle *handle,
                            "WITH risen_object AS"
                            " (DELETE FROM deprecated_object WHERE %s"
                            "  RETURNING oid, object_uuid,"
-                           "  version, user_md, creation_time)"
+                           "  version, user_md, creation_time, size)"
                            " INSERT INTO object (oid, object_uuid, "
-                           "  version, user_md, creation_time)"
+                           "  version, user_md, creation_time, size)"
                            " SELECT * FROM risen_object",
                            oid_list->str);
 
@@ -674,12 +667,13 @@ static int check_orphan(struct dss_handle *handle, const struct pho_id *tape)
 
     g_string_append_printf(request,
         "UPDATE extent SET state = 'orphan' "
-        "WHERE extent_uuid NOT IN ("
-        "  SELECT extent_uuid FROM layout"
-        ")"
-        " AND medium_id = '%s' AND medium_family = '%s' AND"
-        " medium_library = '%s'"
-        ";", tape->name, rsc_family2str(tape->family), tape->library);
+        "WHERE extent_uuid IN ("
+        "  SELECT extent.extent_uuid FROM extent "
+        "    LEFT JOIN layout ON extent.extent_uuid = layout.extent_uuid "
+        "  WHERE layout.extent_uuid IS NULL AND "
+        "    extent.medium_id = '%s' AND extent.medium_family = '%s' AND "
+        "    extent.medium_library = '%s');",
+        tape->name, rsc_family2str(tape->family), tape->library);
 
     rc = execute_and_commit_or_rollback(handle->dh_conn, request, &res,
                                         PGRES_COMMAND_OK);
@@ -783,7 +777,7 @@ int dss_lazy_find_copy(struct dss_handle *handle, const char *uuid,
     }
 
     rc = get_cfg_preferred_order(&preferred_order, &count);
-    if (rc)
+    if (rc != 0 && rc != -ENODATA)
         return rc;
 
     for (i = 0; i < count; ++i) {
@@ -901,4 +895,54 @@ out:
     g_string_free(clause, true);
 
     return rc;
+}
+
+int dss_check_and_take_lock(struct dss_handle *handle,
+                            struct pho_id *id,
+                            struct pho_lock *lock,
+                            enum dss_type resource_type,
+                            void *resource,
+                            const char *hostname, int pid)
+{
+    int rc;
+
+    if (lock->hostname) {
+        if (strcmp(lock->hostname, hostname))
+            LOG_RETURN(-EALREADY,
+                       "resource "FMT_PHO_ID" is already locked by "
+                       "host '%s', owner/pid '%d' but current process on '%s'",
+                       PHO_ID(*id), lock->hostname, lock->owner, hostname);
+
+        if (lock->owner != pid) {
+            if (!lock->is_early)
+                LOG_RETURN(-EALREADY,
+                           "resource "FMT_PHO_ID" is already locked by "
+                           "host '%s', owner/pid '%d' but current process "
+                           "has pid '%d' on host '%s'",
+                           PHO_ID(*id), lock->hostname, lock->owner, pid,
+                           hostname);
+
+            rc = dss_unlock(handle, resource_type, resource, 1, true);
+            if (rc)
+                LOG_RETURN(rc,
+                           "unable to clear previous lock on "
+                           "resource "FMT_PHO_ID,
+                           PHO_ID(*id));
+
+            rc = dss_lock_hostname(handle, resource_type, resource, 1,
+                                   lock->hostname);
+            if (rc)
+                LOG_RETURN(rc, "unable to lock item "FMT_PHO_ID,
+                           PHO_ID(*id));
+        }
+    } else {
+        rc = dss_lock(handle, resource_type, resource, 1);
+        if (rc)
+            LOG_RETURN(rc,
+                       "admin host '%s' owner/pid '%d' failed to lock the "
+                       "resource"FMT_PHO_ID,
+                       hostname, pid, PHO_ID(*id));
+    }
+
+    return 0;
 }

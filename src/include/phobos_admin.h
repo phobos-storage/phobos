@@ -326,6 +326,7 @@ int phobos_admin_ping_tlc(const char *library, bool *library_is_up);
  * \param[in]       medium          Single medium filter.
  * \param[in]       library         Single library filter.
  * \param[in]       copy_name       Single copy name filter.
+ * \param[in]       orphan          Orphan state filter.
  * \param[out]      layouts         Retrieved layouts.
  * \param[out]      n_layouts       Number of retrieved items.
  *
@@ -337,7 +338,7 @@ int phobos_admin_ping_tlc(const char *library, bool *library_is_up);
 int phobos_admin_layout_list(struct admin_handle *adm, const char **res,
                              int n_res, bool is_pattern, const char *medium,
                              const char *library, const char *copy_name,
-                             struct layout_info **layouts,
+                             bool orphan, struct layout_info **layouts,
                              int *n_layouts, struct dss_sort *sort);
 
 /**
@@ -433,6 +434,8 @@ int phobos_admin_media_add(struct admin_handle *adm, struct media_info *med_ls,
  * \param[in]      adm             Admin module handler.
  * \param[in]      med_ids         List of media to remove.
  * \param[in]      num_med         Number of media to remove.
+ * \param[in]      lost            Whether the media to remove should be
+ *                                 considered lost or not
  * \param[out]     num_removed_med Number of removed media.
  *
  * \return                         0      on success,
@@ -441,7 +444,7 @@ int phobos_admin_media_add(struct admin_handle *adm, struct media_info *med_ls,
  * This must be called with an admin_handle initialized with phobos_admin_init.
  */
 int phobos_admin_media_delete(struct admin_handle *adm, struct pho_id *med_ids,
-                              int num_med, int *num_removed_med);
+                              int num_med, bool lost, int *num_removed_med);
 /**
  * Imports non-empty media into the DSS without formatting them thus preserving
  * the data on the device.

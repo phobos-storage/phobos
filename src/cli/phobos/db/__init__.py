@@ -33,7 +33,7 @@ from phobos.core.ffi import (LIBPHOBOS, ResourceFamily)
 
 ORDERED_SCHEMAS = [
     "1.1", "1.2", "1.91", "1.92", "1.93", "1.95",
-    "2.0", "2.1", "2.2", "3.0"
+    "2.0", "2.1", "2.2", "3.0", "3.2",
 ]
 
 FUTURE_SCHEMAS = []
@@ -50,6 +50,46 @@ def get_sql_script(schema_version, script_name):
     script_path = os.path.join(this_dir, "sql", schema_version, script_name)
     with open(script_path) as script_file:
         return script_file.read()
+
+def size_update_3_0_to_3_2(object_table): # pylint: disable=line-too-long
+    """Return the size update SQL query for the given object_table"""
+    return f"""
+        WITH first_copy AS (
+            SELECT DISTINCT ON (object_uuid, version)
+                object_uuid,
+                version,
+                copy_name,
+                lyt_info
+            FROM copy
+            ORDER BY object_uuid, version, copy_status DESC, copy_name
+        ),
+        object_sizes AS (
+            SELECT
+                o.object_uuid,
+                o.version,
+                SUM(e.size) AS total_size
+            FROM {object_table} o
+            INNER JOIN first_copy fc ON o.object_uuid = fc.object_uuid
+                AND o.version = fc.version
+            INNER JOIN layout l ON fc.object_uuid = l.object_uuid
+                AND fc.version = l.version
+                AND fc.copy_name = l.copy_name
+                AND (
+                    ((fc.lyt_info->>'name') = 'raid1'
+                     AND l.layout_index % (fc.lyt_info->'attrs'->>'raid1.repl_count')::integer = 0)
+                    OR
+                    ((fc.lyt_info->>'name') = 'raid4'
+                     AND l.layout_index % 3 != 2)
+                )
+            INNER JOIN extent e ON l.extent_uuid = e.extent_uuid
+            GROUP BY o.object_uuid, o.version
+        )
+        UPDATE {object_table} o
+        SET size = os.total_size
+        FROM object_sizes os
+        WHERE o.object_uuid = os.object_uuid
+            AND o.version = os.version;
+    """
 
 
 class Migrator: # pylint: disable=too-many-public-methods
@@ -72,6 +112,7 @@ class Migrator: # pylint: disable=too-many-public-methods
             "2.0": ("2.1", self.convert_2_0_to_2_1),
             "2.1": ("2.2", self.convert_2_1_to_2_2),
             "2.2": ("3.0", self.convert_2_2_to_3),
+            "3.0": ("3.2", self.convert_3_0_to_3_2),
         }
 
         self.reachable_versions = set(
@@ -280,7 +321,7 @@ class Migrator: # pylint: disable=too-many-public-methods
             UPDATE extent
                 SET lyt_info = json_build_object(
                                 'name', 'raid1',
-                                'attrs', json_build_object('repl_count', '1'),
+                                'attrs', json_build_object('raid1.repl_count', '1'),
                                 'major', 0,
                                 'minor', 2
                                )::jsonb
@@ -657,7 +698,7 @@ class Migrator: # pylint: disable=too-many-public-methods
             self.convert_schema_2_1_to_2_2()
 
     def convert_schema_2_2_to_3(self):
-        """DB schema changes: create copy table"""
+        """DB schema changes from v2.2 to v3.0: create copy table"""
         default_copy_name = cfg.get_default_copy_name()
         cur = self.conn.cursor()
         cur.execute(f"""
@@ -725,6 +766,40 @@ class Migrator: # pylint: disable=too-many-public-methods
         """Convert DB from v2.2 to v3.0"""
         with self.connect():
             self.convert_schema_2_2_to_3()
+
+    def convert_schema_3_0_to_3_2(self):
+        """DB schema changes: append last_locate timestamp to lock,
+           size to object and deprecated object, ctime to extent"""
+        cur = self.conn.cursor()
+        migration_object = size_update_3_0_to_3_2("object")
+        migration_depr = size_update_3_0_to_3_2("deprecated_object")
+        cur.execute(f"""
+            -- update lock table
+            ALTER TABLE lock ADD last_locate timestamp DEFAULT NULL;
+
+            -- update object and deprecated object table
+            ALTER TABLE object ADD size bigint DEFAULT -1;
+            ALTER TABLE deprecated_object ADD size bigint DEFAULT -1;
+
+            {migration_object}
+            {migration_depr}
+
+            -- update extent table
+            ALTER TABLE extent ADD creation_time timestamp DEFAULT now();
+            UPDATE extent SET creation_time = c.creation_time FROM
+                (copy JOIN layout USING (object_uuid, version, copy_name)) c
+                    WHERE extent.extent_uuid = c.extent_uuid;
+
+            -- update current schema version
+            UPDATE schema_info SET version = '3.2';
+        """)
+        self.conn.commit()
+        cur.close()
+
+    def convert_3_0_to_3_2(self):
+        """Convert DB from v3.0 to v3.2"""
+        with self.connect():
+            self.convert_schema_3_0_to_3_2()
 
     def migrate(self, target_version=None):
         """Convert DB schema up to a given phobos version"""

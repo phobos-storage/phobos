@@ -44,6 +44,23 @@ Example:
     [lrs]
     fifo_max_write_per_grouping = 7
 
+*grouping_on_dir*
+-----------------
+
+The parameter **grouping_on_dir** defines if we consider using a grouping to
+choose a dir or not. Value should be either "true" or "false". Default is
+"false". If the value is not "true" or "false", the default value "false" is
+set.
+
+If **grouping_on_dir** is set to "false", no grouping will be set on any dir.
+
+Example:
+
+.. code:: ini
+
+    [lrs]
+    grouping_on_dir = true
+
 *lock_file*
 -----------
 
@@ -203,3 +220,22 @@ Example:
 
     [lrs]
     sync_wsize_kb = tape=1048576,dir=1048576,rados_pool=1048576
+
+*locate_lock_expirancy*
+-----------------------
+
+The **locate_lock_expirancy** parameter defines how long a lock must be kept by
+the LRS before eventually releasing it. This allows one to avoid releasing a
+medium too early in case a locate command targeted it. Its specified value is
+in ms, and must be between **0** and **2^64**.
+0 means immediate expirancy, the scheduler will not retain the medium.
+
+If this parameter is not specified, Phobos defaults to the following:
+**locate_lock_expirancy = 0**.
+
+Example:
+
+.. code:: ini
+
+    [lrs]
+    locate_lock_expirancy = 300000

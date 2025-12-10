@@ -7,22 +7,17 @@ AM_CFLAGS=$(CC_OPT) @CMOCKA_CFLAGS@
 AM_LDFLAGS=@CMOCKA_LIBS@
 
 ADMIN_LIB=$(TO_SRC)/admin/libphobos_admin.la
-CFG_LIB=$(TO_SRC)/core/cfg/libpho_cfg.la
-COMMON_LIB=$(TO_SRC)/core/common/libpho_common.la
-COMMUNICATION_LIB=$(TO_SRC)/core/communication/libpho_comm.la
-DSS_LIB=$(TO_SRC)/core/dss/libpho_dss.la
-LAYOUT_LIB=$(TO_SRC)/layout-modules/libpho_layout_raid1.la
+CORE_LIB=$(TO_SRC)/core/libpho_core.la
+LAYOUT_COMMON_LIB=$(TO_SRC)/layout/libpho_layout_common.la
 LDM_LIB=$(TO_SRC)/ldm/libpho_ldm.la
 LRS_LIB=$(TO_SRC)/lrs/libpho_lrs.la
 MOD_LOAD_LIB=$(TO_SRC)/module-loader/libpho_module_loader.la
 RAID1_LIB=$(TO_SRC)/layout-modules/libpho_layout_raid1.la
 SCSI_LIB=$(TO_SRC)/tlc/scsi/libpho_scsi.la
-SERIALIZER_LIB=$(TO_SRC)/core/serializer/libpho_serializer.la
 STORE_LIB=$(TO_SRC)/store/libphobos_store.la
 IO_LIB=$(TO_SRC)/io/libpho_io.la
 
-TESTS_LIB_DEPS=$(LRS_LIB) $(LDM_LIB) $(IO_LIB) $(DSS_LIB) $(SERIALIZER_LIB) \
-               $(CFG_LIB) $(COMMON_LIB)
+TESTS_LIB_DEPS=$(LRS_LIB) $(LDM_LIB) $(IO_LIB) $(CORE_LIB)
 TESTS_LIB=../../libpho_test_utils.la
 
 TESTS_INCLUDE=-I$(TO_SRC)/core/dss -I$(TO_SRC)/tlc -I$(TO_SRC)/tlc/scsi \
@@ -45,6 +40,8 @@ check_PROGRAMS=phobos_put_copy \
                test_dss \
                test_locate \
                test_lock_clean \
+               test_mput_sync_error \
+               test_multithread \
                test_raid1_split_locate \
                test_scsi \
                test_store \
@@ -58,6 +55,8 @@ check_SCRIPTS=test_bad_comm.sh \
               test_store.test \
               test_locate.test \
               test_lock_clean.sh \
+              test_mput_sync_error.test \
+              test_multithread.test \
               test_put_copy.test \
               test_raid1_split_locate.sh \
               test_scsi.test \
@@ -76,7 +75,7 @@ phobos_put_copy_LDADD=$(STORE_LIB) $(TESTS_LIB) $(TESTS_LIB_DEPS)
 phobos_put_copy_CFLAGS=$(TESTS_INCLUDE)
 
 test_bad_comm_SOURCES=test_bad_comm.c
-test_bad_comm_LDADD=$(COMMUNICATION_LIB) $(TESTS_LIB) $(TESTS_LIB_DEPS)
+test_bad_comm_LDADD=$(CORE_LIB) $(TESTS_LIB) $(TESTS_LIB_DEPS)
 test_bad_comm_CFLAGS=$(TESTS_INCLUDE)
 
 test_concurrency_SOURCES=test_concurrency.c
@@ -91,13 +90,26 @@ test_dss_LDADD=$(ADMIN_LIB) $(TESTS_LIB) $(TESTS_LIB_DEPS)
 test_dss_CFLAGS=$(TESTS_INCLUDE)
 
 test_locate_SOURCES=test_locate.c
-test_locate_LDADD=$(STORE_LIB) $(ADMIN_LIB) $(LAYOUT_LIB) \
+test_locate_LDADD=$(STORE_LIB) $(ADMIN_LIB) $(RAID1_LIB) \
                   $(TESTS_LIB) $(TESTS_LIB_DEPS)
 test_locate_CFLAGS=$(AM_CFLAGS) $(TESTS_INCLUDE)
 
 test_lock_clean_SOURCES=test_lock_clean.c
 test_lock_clean_LDADD=$(ADMIN_LIB) $(STORE_LIB) $(TESTS_LIB) $(TESTS_LIB_DEPS)
 test_lock_clean_CFLAGS=$(TESTS_INCLUDE)
+
+test_mput_sync_error_SOURCES=test_mput_sync_error.c
+test_mput_sync_error_LDADD=$(STORE_LIB) $(LAYOUT_COMMON_LIB) \
+                           $(TESTS_LIB) $(TESTS_LIB_DEPS)
+test_mput_sync_error_CFLAGS=$(AM_CFLAGS) $(TESTS_INCLUDE)
+if USE_XXHASH
+test_mput_sync_error_LDFLAGS=-lxxhash
+endif
+
+test_multithread_SOURCES=test_multithread.c
+test_multithread_LDADD=$(STORE_LIB) $(TESTS_LIB) $(TESTS_LIB_DEPS)
+test_multithread_LDFLAGS=-pthread
+test_multithread_CFLAGS=$(TESTS_INCLUDE)
 
 if RADOS_ENABLED
 test_lib_dev_rados_SOURCES=test_lib_dev_rados.c

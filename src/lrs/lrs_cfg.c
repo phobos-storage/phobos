@@ -84,6 +84,16 @@ const struct pho_config_item cfg_lrs[] = {
         .name    = "fifo_max_write_per_grouping",
         .value   = "0",
     },
+    [PHO_CFG_LRS_grouping_on_dir] = {
+        .section = "lrs",
+        .name    = "grouping_on_dir",
+        .value   = "false",
+    },
+    [PHO_CFG_LRS_locate_lock_expirancy] = {
+        .section = "lrs",
+        .name    = "locate_lock_expirancy",
+        .value   = "0",
+    },
 };
 
 static int _get_unsigned_long_from_string(const char *value,
@@ -118,7 +128,8 @@ int get_cfg_sync_time_ms_value(enum rsc_family family,
     char *value;
     int rc;
 
-    rc = pho_cfg_get_substring_value("lrs", "sync_time_ms", family, &value);
+    rc = PHO_CFG_GET_SUBSTRING_VALUE(cfg_lrs, PHO_CFG_LRS, sync_time_ms,
+                                     family, &value);
     if (rc)
         return rc;
 
@@ -139,7 +150,8 @@ int get_cfg_sync_nb_req_value(enum rsc_family family, unsigned int *threshold)
     char *value;
     int rc;
 
-    rc = pho_cfg_get_substring_value("lrs", "sync_nb_req", family, &value);
+    rc = PHO_CFG_GET_SUBSTRING_VALUE(cfg_lrs, PHO_CFG_LRS, sync_nb_req,
+                                     family, &value);
     if (rc)
         return rc;
 
@@ -158,7 +170,8 @@ int get_cfg_sync_wsize_value(enum rsc_family family, unsigned long *threshold)
     char *value;
     int rc;
 
-    rc = pho_cfg_get_substring_value("lrs", "sync_wsize_kb", family, &value);
+    rc = PHO_CFG_GET_SUBSTRING_VALUE(cfg_lrs, PHO_CFG_LRS, sync_wsize_kb,
+                                     family, &value);
     if (rc)
         return rc;
 
