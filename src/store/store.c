@@ -2208,7 +2208,18 @@ int phobos_locate(const char *oid, const char *uuid, int version,
     if (rc)
         GOTO(clean, rc);
 
-    assert(cnt == 1);
+    if (cnt == 0) {
+        dss_res_free(layout, cnt);
+        LOG_GOTO(clean, rc = -ENOENT,
+                 "Failed to find layout of object with uuid '%s', version '%d' and copy '%s'. "
+                 "The object is registered in the database but without any layout, you might want to delete it",
+                 obj->uuid, obj->version, copy->copy_name);
+    } else if (cnt > 1) {
+        dss_res_free(layout, cnt);
+        LOG_GOTO(clean, rc = -ETOOMANYREFS,
+                 "UUID '%s', version '%d' and copy_name '%s' should uniquely identify a layout, found '%d' layouts matching",
+                 obj->uuid, obj->version, copy->copy_name, cnt);
+    }
 
     /* locate media */
     rc = layout_locate(&dss, layout, focus_host, hostname, nb_new_lock);
