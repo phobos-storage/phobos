@@ -283,7 +283,7 @@ static int _add_extent_to_dss(struct dss_handle *dss,
         LOG_RETURN(rc, "Could not get extent '%s'", lyt_insert->oid);
 
     if (layout_count > 1)
-        LOG_GOTO(lyt_info_get_free, rc = -ENOTSUP,
+        LOG_GOTO(lyt_info_get_free, rc = -ETOOMANYREFS,
                  "UUID '%s', version '%d' and copy_name '%s' should uniquely "
                  "identify a layout, found '%d' layouts matching",
                  lyt_insert->uuid, lyt_insert->version, lyt_insert->copy_name,
@@ -843,6 +843,13 @@ int reconstruct_copy(struct admin_handle *adm, struct copy_info *copy)
     dss_filter_free(&filter);
     if (rc)
         return rc;
+
+    if (lyt_cnt > 1)
+        LOG_GOTO(end, rc = -ETOOMANYREFS,
+                 "UUID '%s', version '%d' and copy_name '%s' should uniquely "
+                 "identify a layout, found '%d' layouts matching",
+                 copy->object_uuid, copy->version, copy->copy_name,
+                 lyt_cnt);
 
     // Works like this in the current database version
     assert(lyt_cnt <= 1);

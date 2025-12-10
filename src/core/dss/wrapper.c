@@ -807,7 +807,14 @@ int dss_lazy_find_copy(struct dss_handle *handle, const char *uuid,
     if (rc)
         LOG_RETURN(rc, "Cannot fetch copy for objuuid:'%s'", uuid);
 
-    assert(copy_cnt >= 1);
+    if (copy_cnt == 0) {
+        pho_error(rc = -ENOENT,
+                  "Failed to find a copy of object with uuid '%s' and version '%d'",
+                  uuid, version);
+        LOG_RETURN(rc,
+                   "Object ('%s', '%d') is registered in the database but without any copy, you might want to delete it.",
+                   uuid, version);
+    }
 
     *copy = copy_info_dup(&copy_list[0]);
 
