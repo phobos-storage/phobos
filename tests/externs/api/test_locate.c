@@ -384,6 +384,43 @@ static void pl_hostname(const char *expected_hostname, const char *focus_host,
     free(hostname);
 }
 
+static void pl_enoent_with_only_object(void **state)
+{
+    struct phobos_locate_state *pl_state = (struct phobos_locate_state *)*state;
+    char *uuid = "pl_enoent_with_only_object";
+    char *oid = "pl_enoent_with_only_object";
+    struct object_info obj = {
+        .oid = oid,
+        .uuid = uuid,
+        .version = 1,
+        .user_md = "{}",
+        .grouping = NULL,
+        .size = 42,
+    };
+    struct copy_info copy = {
+        .object_uuid = uuid,
+        .version = 1,
+        .copy_name = "source",
+        .copy_status = PHO_COPY_STATUS_INCOMPLETE,
+    };
+    char *hostname;
+    int rc;
+
+    rc = dss_object_insert(pl_state->dss, &obj, 1, DSS_SET_FULL_INSERT);
+    assert_int_equal(rc, 0);
+
+    rc = dss_copy_insert(pl_state->dss, &copy, 1);
+    assert_int_equal(rc, 0);
+
+    /* Locate on object without any layout should gracefully fail */
+    rc = phobos_locate("pl_enoent_with_only_object", NULL, 0, NULL, NULL,
+                       &hostname, NULL);
+    assert_int_equal(rc, -ENOENT);
+
+    rc = dss_object_delete(pl_state->dss, &obj, 1);
+    assert_int_equal(rc, 0);
+}
+
 static void pl(void **state)
 {
     struct phobos_locate_state *pl_state = (struct phobos_locate_state *)*state;
@@ -445,6 +482,8 @@ static void pl(void **state)
         pl_hostname(myself_hostname, NULL, state, false);
         pl_hostname(myself_hostname, myself_hostname, state, false);
     }
+
+    pl_enoent_with_only_object(state);
 }
 
 /************************************/
