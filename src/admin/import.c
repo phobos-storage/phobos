@@ -851,9 +851,6 @@ int update_copy_availability(struct admin_handle *adm, struct copy_info *copy)
                  copy->object_uuid, copy->version, copy->copy_name,
                  lyt_cnt);
 
-    // Works like this in the current database version
-    assert(lyt_cnt <= 1);
-
     if (lyt_cnt == 0) {
         copy->copy_status = PHO_COPY_STATUS_INCOMPLETE;
         goto end;

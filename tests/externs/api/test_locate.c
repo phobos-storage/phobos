@@ -417,6 +417,8 @@ static void pl_enoent_with_only_object(void **state)
                        &hostname, NULL);
     assert_int_equal(rc, -ENOENT);
 
+    rc = dss_copy_delete(pl_state->dss, &copy, 1);
+    assert_int_equal(rc, 0);
     rc = dss_object_delete(pl_state->dss, &obj, 1);
     assert_int_equal(rc, 0);
 }
