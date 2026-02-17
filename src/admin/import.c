@@ -283,7 +283,7 @@ static int _add_extent_to_dss(struct dss_handle *dss,
         LOG_RETURN(rc, "Could not get extent '%s'", lyt_insert->oid);
 
     if (layout_count > 1)
-        LOG_GOTO(lyt_info_get_free, rc = -ENOTSUP,
+        LOG_GOTO(lyt_info_get_free, rc = -ETOOMANYREFS,
                  "UUID '%s', version '%d' and copy_name '%s' should uniquely "
                  "identify a layout, found '%d' layouts matching",
                  lyt_insert->uuid, lyt_insert->version, lyt_insert->copy_name,
@@ -844,8 +844,12 @@ int update_copy_availability(struct admin_handle *adm, struct copy_info *copy)
     if (rc)
         return rc;
 
-    // Works like this in the current database version
-    assert(lyt_cnt <= 1);
+    if (lyt_cnt > 1)
+        LOG_GOTO(end, rc = -ETOOMANYREFS,
+                 "UUID '%s', version '%d' and copy_name '%s' should uniquely "
+                 "identify a layout, found '%d' layouts matching",
+                 copy->object_uuid, copy->version, copy->copy_name,
+                 lyt_cnt);
 
     if (lyt_cnt == 0) {
         copy->copy_status = PHO_COPY_STATUS_INCOMPLETE;
