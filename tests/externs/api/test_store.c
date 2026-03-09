@@ -117,6 +117,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "       %s tag-put <file> <tag> <...>\n", argv[0]);
         fprintf(stderr, "       %s get <id> <dest>\n", argv[0]);
         fprintf(stderr, "       %s list <id>\n", argv[0]);
+        fprintf(stderr, "       %s setmd <id> <key> <value>\n", argv[0]);
         exit(1);
     }
 
@@ -254,6 +255,49 @@ out_free_mput:
             pho_error(rc, "GET '%s' failed", argv[2]);
 
         xfer_close_fd(xfer.xd_targets);
+    } else if (!strcmp(argv[1], "setmd")) {
+        struct pho_xfer_target target_update = {0};
+        struct pho_xfer_target target_getmd = {0};
+        struct pho_xfer_desc xfer_getmd = {0};
+        struct pho_xfer_desc xfer = {0};
+
+        if (argc != 5) {
+            fprintf(stderr, "%s setmd <id> <key> <value>\n",
+                    argv[0]);
+            rc = errno;
+            goto out_attrs;
+        }
+
+        pho_attr_set(&attrs, argv[3], argv[4]);
+
+        target_update.xt_objid = argv[2];
+        target_update.xt_attrs = attrs;
+        xfer.xd_targets = &target_update;
+
+        rc = phobos_setmd(&xfer, 1);
+
+        pho_xfer_desc_clean(&xfer);
+
+        if (rc)
+            pho_error(rc, "SETMD '%s' failed", argv[2]);
+
+        target_getmd.xt_objid = argv[2];
+        xfer_getmd.xd_targets = &target_getmd;
+
+        rc = phobos_getmd(&xfer_getmd, 1, NULL, NULL);
+
+        if (rc)
+            pho_error(rc, "SETMD GETMD '%s' failed", argv[2]);
+
+        const char *value = pho_attr_get(&target_getmd.xt_attrs, argv[3]);
+
+        if (value == NULL || strcmp(value, argv[4]) != 0) {
+            rc = -EINVAL;
+            pho_error(rc, "SETMD '%s' failed: expected value '%s', got '%s'",
+                    argv[2], argv[4], value ? value : "NULL");
+        }
+
+        pho_xfer_desc_clean(&xfer_getmd);
     } else if (!strcmp(argv[1], "list")) {
         struct pho_list_filters filters = {0};
         struct object_info *objs;
@@ -278,7 +322,8 @@ out_free_mput:
         }
     } else {
         rc = -EINVAL;
-        pho_error(rc, "verb put|mput|get|list expected at '%s'\n", argv[1]);
+        pho_error(rc, "verb put|mput|get|list|setmd expected at '%s'\n",
+                argv[1]);
     }
 
 out_attrs:

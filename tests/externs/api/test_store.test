@@ -274,6 +274,19 @@ function test_put_get()
 }
 
 ################################################################################
+#                            TEST WITH SETMD                                   #
+################################################################################
+
+function test_setmd()
+{
+
+    local oid="${TEST_RAND}_put"
+
+    $LOG_COMPILER $test_bin setmd $oid "test-key" "test-value"
+
+}
+
+################################################################################
 #                              MAIN TEST ROUTINE                               #
 ################################################################################
 
@@ -284,6 +297,8 @@ function test_routine()
     test_put_get "put"
 
     test_put_get "mput"
+
+    test_setmd
 }
 
 function setup_base

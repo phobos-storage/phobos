@@ -1882,6 +1882,117 @@ int phobos_getmd(struct pho_xfer_desc *xfers, size_t n,
     return phobos_xfer(xfers, n, cb, udata);
 }
 
+int phobos_setmd(struct pho_xfer_desc *xfers, size_t num_xfers)
+{
+    struct dss_handle dss;
+    size_t i;
+    int rc;
+
+    /* Ensure conf is loaded */
+    rc = pho_cfg_init_local(NULL);
+    if (rc && rc != -EALREADY)
+        LOG_RETURN(rc, "Cannot init access to local config parameters");
+
+    /* Connect to the DSS */
+    rc = dss_init(&dss);
+    if (rc)
+        LOG_RETURN(rc, "Cannot initialize a connection handle");
+
+    for (i = 0; i < num_xfers; i++) {
+        /* If the uuid is given by the user, we don't own that memory.
+         * The simplest solution is to duplicate it here so that it can
+         * be freed at the end by pho_xfer_desc_clean().
+         *
+         * The user of this function must free any allocated string passed to
+         * the xfer.
+         *
+         * For the Python CLI, the garbage collector will take care of
+         * this pointer.
+         */
+        if (xfers[i].xd_targets->xt_objuuid)
+            xfers[i].xd_targets->xt_objuuid =
+                xstrdup(xfers[i].xd_targets->xt_objuuid);
+
+        struct pho_xfer_target *xd_target = &xfers[i].xd_targets[0];
+        struct object_info lock_obj = { .oid = xd_target->xt_objid };
+        GString *md_repr = g_string_new(NULL);
+        struct object_info *old_obj = NULL;
+        struct object_info new_obj = {0};
+        int rc2;
+
+        xfers[i].xd_op = PHO_XFER_OP_SETMD;
+        xfers[i].xd_rc = 0;
+
+        if (xd_target->xt_objid == NULL) {
+            xfers[i].xd_rc = -EINVAL;
+            LOG_GOTO(CLEAN, -EINVAL, "setmd: objid must be set");
+        }
+
+        rc2 = pho_attrs_to_json(&xd_target->xt_attrs, md_repr, 0);
+        if (rc2) {
+            xfers[i].xd_rc = rc2;
+            LOG_GOTO(CLEAN, rc2,
+                     "Cannot convert attributes of objid %s into JSON",
+                     xd_target->xt_objid);
+        }
+
+        rc2 = dss_lock(&dss, DSS_OBJECT, &lock_obj, 1);
+        if (rc2) {
+            xfers[i].xd_rc = rc2;
+            LOG_GOTO(CLEAN, rc2, "Cannot lock the object %s for setmd",
+                     lock_obj.oid);
+        }
+
+        rc2 = dss_lazy_find_object(&dss, xd_target->xt_objid,
+                                   xd_target->xt_objuuid, xd_target->xt_version,
+                                   &old_obj);
+
+        if (rc2) {
+            xfers[i].xd_rc = rc2;
+            LOG_GOTO(UNLOCK, xfers[i].xd_rc,
+                     "Unable to locate Object '%s' for setmd", lock_obj.oid);
+        }
+
+        new_obj.oid = old_obj->oid;
+        new_obj.uuid = old_obj->uuid;
+        new_obj.version = xd_target->xt_version;
+        new_obj.user_md = md_repr->str;
+
+        // if deprec_time is set then the object is a deprecated one.
+        if (old_obj->deprec_time.tv_sec) {
+            rc2 = dss_deprecated_object_update(&dss, old_obj, &new_obj, 1,
+                    DSS_OBJECT_UPDATE_USER_MD);
+        } else {
+            rc2 = dss_object_update(&dss, old_obj, &new_obj, 1,
+                    DSS_OBJECT_UPDATE_USER_MD);
+        }
+
+        if (rc2) {
+            xfers[i].xd_rc = rc2;
+            pho_error(rc2, "Cannot update metadata for %s", lock_obj.oid);
+        }
+
+        object_info_free(old_obj);
+
+UNLOCK:
+        rc2 = dss_unlock(&dss, DSS_OBJECT, &lock_obj, 1, false);
+        if (rc2) {
+            pho_error(rc2, "Unable to unlock object %s after setmd",
+                      lock_obj.oid);
+            rc = rc ? : rc2;
+        }
+CLEAN:
+        rc = rc ? : xfers[i].xd_rc;
+        g_string_free(md_repr, true);
+
+        pho_xfer_desc_clean(xfers);
+    }
+
+    dss_fini(&dss);
+
+    return rc;
+}
+
 int phobos_delete(struct pho_xfer_desc *xfers, size_t num_xfers)
 {
     size_t j;
@@ -2015,6 +2126,7 @@ static void (*xfer_param_cleaner[PHO_XFER_OP_LAST])(struct pho_xfer_desc *) = {
     [PHO_XFER_OP_PUT]   = xfer_put_param_clean,
     [PHO_XFER_OP_GET]   = NULL,
     [PHO_XFER_OP_GETMD] = NULL,
+    [PHO_XFER_OP_SETMD] = NULL,
     [PHO_XFER_OP_DEL]   = NULL,
     [PHO_XFER_OP_UNDEL] = NULL,
     [PHO_XFER_OP_COPY]  = xfer_copy_param_clean,

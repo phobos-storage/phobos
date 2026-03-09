@@ -83,7 +83,13 @@ static int deprecated_insert_query(PGconn *conn, void *void_deprecated,
     return 0;
 }
 
+static inline const char *_get_user_md(void *object)
+{
+    return ((struct object_info *) object)->user_md;
+}
+
 static struct dss_field FIELDS[] = {
+    { DSS_OBJECT_UPDATE_USER_MD, "user_md = '%s'", _get_user_md },
     { DSS_OBJECT_UPDATE_OID, "oid = '%s'", get_oid },
 };
 
@@ -101,7 +107,7 @@ static int deprecated_update_query(PGconn *conn, void *src_deprecated,
 
         g_string_append(sub_request, "UPDATE deprecated_object SET ");
 
-        update_fields(dst, fields, FIELDS, 1, sub_request);
+        update_fields(dst, fields, FIELDS, 2, sub_request);
 
         g_string_append_printf(sub_request,
                                " WHERE object_uuid = '%s' AND version = %d;",

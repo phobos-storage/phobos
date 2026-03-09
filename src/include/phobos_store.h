@@ -80,6 +80,7 @@ enum pho_xfer_op {
     PHO_XFER_OP_PUT,   /**< PUT operation. */
     PHO_XFER_OP_GET,   /**< GET operation. */
     PHO_XFER_OP_GETMD, /**< GET metadata operation. */
+    PHO_XFER_OP_SETMD, /**< SET metedata operation. */
     PHO_XFER_OP_DEL,   /**< DEL operation. */
     PHO_XFER_OP_UNDEL, /**< UNDEL operation. */
     PHO_XFER_OP_COPY,  /**< COPY operation. */
@@ -90,6 +91,7 @@ static const char * const xfer_op_names[] = {
     [PHO_XFER_OP_PUT]   = "PUT",
     [PHO_XFER_OP_GET]   = "GET",
     [PHO_XFER_OP_GETMD] = "GETMD",
+    [PHO_XFER_OP_SETMD] = "SETMD",
     [PHO_XFER_OP_DEL]   = "DELETE",
     [PHO_XFER_OP_UNDEL] = "UNDELETE",
     [PHO_XFER_OP_COPY]  = "COPY",
@@ -312,6 +314,29 @@ int phobos_get(struct pho_xfer_desc *xfers, size_t n,
  */
 int phobos_getmd(struct pho_xfer_desc *xfers, size_t n,
                  pho_completion_cb_t cb, void *udata);
+
+/**
+ * Set (replace) the metadata from the object store
+ *
+ * This will only update the user_md in the DSS. No new object version and no
+ * media are created or modified.
+ *
+ * @param[in]   xfers       Objects whose metedata will be updated
+ * @param[in]   num_xfers   Number of objects to update
+ *
+ * The following fields are used inside the xfer descriptor:
+ * - xt_objid: ID of the object to update
+ * - xt_objuuid: UUID of the object to update
+ * - xt_version: object version targeted
+ * - xt_attrs: the new metadata to write
+ *
+ * Other fields are not used.
+ *
+ * @return              0 on success or -errno on failure.
+ *
+ * This must be called after phobos_init.
+ */
+int phobos_setmd(struct pho_xfer_desc *xfers, size_t num_xfers);
 
 /** query metadata of the object store */
 /* TODO int phobos_query(criteria, &obj_list); */
