@@ -861,5 +861,9 @@ end:
 
     rc = dss_copy_update(&adm->dss, copy, copy, 1,
                          DSS_COPY_UPDATE_COPY_STATUS);
+    pho_info("Copy '%s' of object with uuid '%s' and version '%d' is now: %s",
+             copy->copy_name, copy->object_uuid, copy->version,
+             copy_status2str(copy->copy_status));
+
     return rc;
 }
