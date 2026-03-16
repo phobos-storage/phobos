@@ -2,7 +2,7 @@
  * vim:expandtab:shiftwidth=4:tabstop=4:
  */
 /*
- *  All rights reserved (c) 2014-2025 CEA/DAM.
+ *  All rights reserved (c) 2014-2026 CEA/DAM.
  *
  *  This file is part of Phobos.
  *
@@ -47,34 +47,37 @@
 struct pho_xfer_desc;
 
 /**
- * Transfer (GET / PUT / MPUT) flags.
- * Exact semantic depends on the operation it is applied on.
+ * Xfer behavior flags.
+ *
+ * The exact meaning of each flag depends on the operation to which it is
+ * applied.
  */
 enum pho_xfer_flags {
-    /**
-     * put: replace the object if it already exists (_not supported_)
-     * get: replace the target file if it already exists
-     */
+    /* GET: replace the target file if it already exists */
     PHO_XFER_OBJ_REPLACE    = (1 << 0),
-    /* get: check the object's location before getting it */
+    /* GET: check the object's location before getting it */
     PHO_XFER_OBJ_BEST_HOST  = (1 << 1),
-    /* del: hard remove the object */
+    /* DEL: hard remove the object */
     PHO_XFER_OBJ_HARD_DEL   = (1 << 2),
-    /* del: hard remove the copy */
+    /* COPY DEL: hard remove the copy */
     PHO_XFER_COPY_HARD_DEL  = (1 << 3),
 };
 
 /**
- * Multiop completion notification callback.
- * Invoked with:
- *  - user-data pointer
- *  - the operation descriptor
- *  - the return code for this operation: 0 on success, neg. errno on failure
+ * Xfer completion callback.
+ *
+ * This callback is invoked once for each processed Xfer.
+ *
+ * \param[in] udata  User-provided data.
+ * \param[in] xfer   Xfer descriptor associated with the operation.
+ * \param[in] rc     Return code for this Xfer operation: 0 on sucess, errno on
+ *                   failure.
  */
-typedef void (*pho_completion_cb_t)(void *u, const struct pho_xfer_desc *, int);
+typedef void (*pho_completion_cb_t)(void *udata,
+                                    const struct pho_xfer_desc *xfer, int rc);
 
 /**
- * Phobos XFer operations.
+ * Phobos Xfer operations.
  */
 enum pho_xfer_op {
     PHO_XFER_OP_PUT,   /**< PUT operation. */
@@ -107,64 +110,100 @@ static inline const char *xfer_op2str(enum pho_xfer_op op)
 
 /**
  * PUT parameters.
- * Family, layout_name and tags can be set directly or by using a profile.
- * A profile is a name defined in the phobos config to combine these parameters.
- * The profile will not override family and layout if they have been specified
- * in this struct but extend existing tags.
+ *
+ * Family, layout_name, library and tags can be set directly or by using a
+ * profile. A profile is a name defined in the phobos config to combine these
+ * parameters. The profile does not override family, library and layout if they
+ * are specified, but it extends existing tags.
+ *
+ * Copy_name can be set directly, otherwise the default copy_name is used.
+ * The copy_name can also be associated with a profile.
+ *
+ * The grouping and overwrite/no_split options must be set directly in order to
+ * use them. They cannot be set by a profile.
  */
 struct pho_xfer_put_params {
-    enum rsc_family  family;      /**< Targeted resource family. */
-    const char      *grouping;    /**< Grouping attached to the new object.
+    enum rsc_family  family;      /**< [in] Targeted resource family. */
+    const char      *grouping;    /**< [in] Grouping attached to the new object.
                                     *  For a new copy of an existing object,
                                     *  we can't set a new grouping. Grouping
                                     *  of the pre-existing object is used.
                                     */
-    const char      *library;     /**< Targeted library (If NULL, any available
-                                    *  library can be selected.)
+    const char      *library;     /**< [in] Targeted library (If NULL, any
+                                    *  available library can be selected.)
                                     */
-    const char      *layout_name; /**< Name of the layout module to use. */
-    struct pho_attrs lyt_params;  /**< Parameters used for the layout */
-    struct string_array     tags; /**< Tags to select a media to write. */
-    const char      *profile;     /**< Identifier for family, layout,
-                                    *  tag combination
+    const char      *layout_name; /**< [in] Name of the layout module to use. */
+    struct pho_attrs lyt_params;  /**< [in] Parameters used for the layout */
+    struct string_array     tags; /**< [in] Tags to select a media to write. */
+    const char      *profile;     /**< [in] A configuration profile which
+                                    *  defines the family, library, layout and
+                                    *  tag combination to use.
                                     */
-    const char      *copy_name;   /**< Copy reference. */
-    bool             overwrite;   /**< true if the put command could be an
+    const char      *copy_name;   /**< [in] Name of the copy being written. A
+                                    *  copy name can also be associated with a
+                                    *  profile in the configuration.
+                                    */
+    bool             overwrite;   /**< [in] true if the put command could be an
                                     *  update.
                                     */
-    bool             no_split;    /**< true if all xfer of the put command
-                                    *  should be put on the same medium.
+    bool             no_split;    /**< [in] true if all targets inside a xfer of
+                                    *  the put command should be written without
+                                    *  split (.eg on the same media).
                                     */
 };
 
 /**
  * GET parameters.
- * Node_name corresponds to the name of the node the object can be retrieved
- * from, if a phobos_get call fails.
- * Copy_name corresponds to the copy to get.
+ *
+ * Scope corresponds to where Phobos should search for the object to retrieve.
+ * All possible values are DSS_OBJ_ALIVE (search only in the alive objects),
+ * DSS_OBJ_DEPRECATED (search only in the deprecated objects) and DSS_OBJ_ALL
+ * (search in the alive and deprecated objects).
  */
 struct pho_xfer_get_params {
-    const char *copy_name;          /**< Copy to retrieve. */
-    enum dss_obj_scope scope;       /**< Scope of the object to get
-                                      *  (alive, deprecated, ...).
+    const char *copy_name;          /**< [in] Preferred copy to retrieve. If
+                                      *  NULL, Phobos selects a copy from the
+                                      *  preferred_order, then the default copy
+                                      *  and finally the copy found.
                                       */
-    char *node_name;                /**< Node name [out] */
+    enum dss_obj_scope scope;       /**< [in] Object visibility scope to query
+                                      *  (alive, deprecated, both).
+                                      */
+    char *node_name;                /**< [out] Hostname determined during a GET
+                                      *  with the flag PHO_XFER_OBJ_BEST_HOST.
+                                      *  node_name is NULL if the object is on
+                                      *  the local node, otherwise set with the
+                                      *  hostname where the object can be get.
+                                      */
 };
 
 /*
  * DEL parameters.
- * Copy name corresponds to the name of the copy to delete. Copies can only be
- * hard deleted.
+ *
+ * These parameters are not used when doing a soft delete on objects.
+ *
+ * Scope corresponds to where Phobos should search the object to either
+ * delete it or delete a copy of this object. All possible values are
+ * DSS_OBJ_ALIVE (check only the alive objects), DSS_OBJ_DEPRECATED (check only
+ * the deprecated objects) and DSS_OBJ_ALL (check the alive and deprecated
+ * objects).
+ *
+ * Check the description of `phobos_delete`.
  */
 struct pho_xfer_del_params {
-    char *copy_name;           /**< Copy name input PHO_XFER_COPY_HARD_DEL */
-    enum dss_obj_scope scope;  /**< Scope of the object to delete
-                                 *  (alive, deprecated, ...).
+    char *copy_name;           /**< [in] Name of the copy to hard delete when
+                                 *  the flag PHO_XFER_COPY_HARD_DEL is used.
+                                 */
+    enum dss_obj_scope scope;  /**< [in] Object visibility scope to delete
+                                 *  (alive, deprecated, both).
                                  */
 };
 
 /*
  * COPY parameters.
+ *
+ * COPY combines the PUT and GET parameters because it selects an object and
+ * does another copy.
  */
 struct pho_xfer_copy_params {
     struct pho_xfer_get_params get; /**< Get parameters to use to copy */
@@ -183,36 +222,53 @@ union pho_xfer_params {
 
 /**
  * Xfer descriptor.
- * The source/destination semantics of the fields vary
- * depending on the nature of the operation.
+ * The source/destination semantics of the fields vary depending on the nature
+ * of the operation.
+ *
  * See below:
- *  - phobos_getmd()
+ *  - phobos_copy()
+ *  - phobos_delete()
  *  - phobos_get()
+ *  - phobos_getmd()
  *  - phobos_put()
  *  - phobos_undelete()
- *  - phobos_copy()
  */
 struct pho_xfer_desc {
     enum pho_xfer_op        xd_op;       /**< Operation to perform. */
     union pho_xfer_params   xd_params;   /**< Operation parameters. */
-    enum pho_xfer_flags     xd_flags;    /**< See enum pho_xfer_flags doc. */
-    int                     xd_rc;       /**< Outcome of this xfer. */
+    enum pho_xfer_flags     xd_flags;    /**< Bitmask of pho_xfer_flags values
+                                           */
+    int                     xd_rc;       /**< Outcome of this xfer,
+                                           *  0 on success, -errno on failure
+                                           */
     int                     xd_ntargets; /**< Number of objects. */
     struct pho_xfer_target *xd_targets;  /**< Object(s) to transfer. */
 };
 
+/**
+ * Xfer target.
+ *
+ * This structure carries all the information for one object.
+ */
 struct pho_xfer_target {
-    char             *xt_objid;   /**< Object ID to read or write. */
-    char             *xt_objuuid; /**< Object UUID to read or write. */
+    char             *xt_objid;   /**< Object ID to GET/PUT/DEL/COPY. */
+    char             *xt_objuuid; /**< Object UUID to GET/PUT/DEL/COPY. */
     int               xt_version; /**< Object version. */
-    int               xt_fd;      /**< FD of the source/destination. */
-    struct pho_attrs  xt_attrs;   /**< User defined attributes. */
-    ssize_t           xt_size;    /**< Amount of data to write. */
+    int               xt_fd;      /**< FD of the source/destination while doing
+                                    *  a GET or PUT. If it's a PUT, xt_fd is
+                                    *  the object's source. If it's a GET,
+                                    *  xt_fd is where the object is retrieved.
+                                    */
+    struct pho_attrs  xt_attrs;   /**< User defined metadata. */
+    ssize_t           xt_size;    /**< Amount of data to write during a PUT */
     int               xt_rc;      /**< Outcome for this target's xfer. */
 };
 
 /**
  * Initialize the global context of Phobos.
+ *
+ * This function must be called before any other API entry point from this
+ * header.
  *
  * This must be called using the following order:
  *   phobos_init -> ... -> phobos_fini
@@ -230,23 +286,24 @@ int phobos_init(void);
 void phobos_fini(void);
 
 /**
- * Put N files to the object store with minimal overhead.
- * Each desc entry contains:
- * - objid: the target object identifier
- * - fd: an opened fd to read from
- * - size: amount of data to read from fd
- * - layout_name: (optional) name of the layout module to use
- * - attrs: the metadata (optional)
- * - flags: behavior flags
- * - tags: tags defining constraints on which media can be selected to put the
- *   data
- * Other fields are not used.
+ * Put files to the object store with minimal overhead.
  *
- * Individual completion notifications are issued via xd_callback.
- * This function returns the first encountered error or 0 if all
- * sub-operations have succeeded.
+ * Each Xfer descriptor must describe a PUT operation and provide one or more
+ * targets. Each target must provide:
+ *  - xt_objid : the target object identifier
+ *  - xt_fd    : an open fd to read from
+ *  - xt_size  : amount of data to read from fd
+ *  - xt_attrs : user metadata (OPTIONAL)
+ * other parameters are not used for a PUT.
  *
- * @return              0 on success or -errno on failure.
+ * The xd_params can be provided or they will be overriden with default values.
+ *
+ * \param[in,out]  xfers  List of Xfer descriptors
+ * \param[in]      n      Number of Xfer descriptors
+ * \param[in]      cb     Optional completion callback per Xfer
+ * \param[in]      udata  User data passed to cb
+ *
+ * @return                0 on success or -errno on failure.
  *
  * This must be called after phobos_init.
  */
@@ -255,41 +312,47 @@ int phobos_put(struct pho_xfer_desc *xfers, size_t n,
 
 /**
  * Retrieve N files from the object store
- * desc contains:
- * - objid:   identifier of the object to retrieve, this is mandatory.
  *
- * - objuuid: uuid of the object to retrieve
- *            if not NULL, this field is duplicated internally and freed by
- *            pho_xfer_desc_clean(). The caller have to make sure to keep
- *            a copy of this pointer if it needs to be freed.
- *            if NULL and there is an object alive, get the current generation
- *            if NULL and there is no object alive, check the deprecated
- *            objects:
- *                if they all share the same uuid, the object matching
- *                the version criteria is retrieved
+ * Each Xfer descriptor must describe a GET operation and provide ONLY one
+ * target. A target must provide:
+ *  - xt_objid   : the target object identifier
  *
- * - version: version of the object to retrieve
- *            if 0, get the most recent object. Otherwise, the object with the
- *            matching version is returned if it exists
- *            if there is an object in the object table and its version does
- *            not match, phobos_get() will target the current generation and
- *            query the deprecated_object table
+ *  - xt_objuuid : uuid of the object to retrieve (OPTIONAL)
+ *                 if not NULL, this field is duplicated internally and freed by
+ *                 pho_xfer_desc_clean(). The caller has to make sure to keep
+ *                 a copy of this pointer if it needs to be freed.
+ *                 if NULL and there is an object alive, get the current
+ *                 generation
+ *                 if NULL and there is no object alive, check the deprecated
+ *                 objects:
+ *                      if they all share the same uuid, the object matching
+ *                      the version criteria or the most recent one is retrieved
  *
- * - fd: an opened fd to write to
- * - attrs: unused (can be NULL)
- * - flags: behavior flags
+ *  - xt_version : version of the object to retrieve (OPTIONAL)
+ *                 if 0, get the most recent object. Otherwise, the object with
+ *                 the matching version is returned if it exists if there is an
+ *                 object in the object table and its version does not match,
+ *                 phobos_get() will target the current generation and
+ *                 query the deprecated_object table
+ *
+ *  - xt_fd      : an opened fd to write to
+ *
+ * The scope inside the GET xd_params must be set. See the pho_xfer_get_params.
+ *
+ * xd_flags can be set to PHO_XFER_OBJ_BEST_HOST to check the object's location
+ * before getting it. If the object is not on the current node, node_name in
+ * the get parameters will be set with the object's location.
  *
  * If objuuid and version are NULL and 0, phobos_get() will only query the
  * object table. Otherwise, the object table is queried first and then the
  * deprecated_object table.
  *
- * Other fields are not used.
+ * \param[in,out]  xfers  List of Xfer descriptors
+ * \param[in]      n      Number of Xfer descriptors
+ * \param[in]      cb     Optional completion callback per Xfer
+ * \param[in]      udata  User data passed to cb
  *
- * Individual completion notifications are issued via xd_callback.
- * This function returns the first encountered error or 0 if all
- * sub-operations have succeeded.
- *
- * @return              0 on success or -errno on failure.
+ * @return                0 on success or -errno on failure.
  *
  * This must be called after phobos_init.
  */
@@ -298,22 +361,22 @@ int phobos_get(struct pho_xfer_desc *xfers, size_t n,
 
 /**
  * Retrieve N file metadata from the object store
- * desc contains:
- * - objid: identifier of the object to retrieve
- * - objuuid: uuid of the object to retrieve
- * - attrs: unused (can be NULL)
- * - flags: behavior flags
- * - version: version of the object to retrieve
- *            if 0, get the most recent object. Otherwise, the object with the
- *            matching version is returned if it exists
  *
- * Other fields are not used.
+ * Each Xfer descriptor must provide ONLY one target. A target must provide:
+ *  - xt_objid   : the target object identifier (MANDATORY)
+ *  - xt_objuuid : uuid of the object to retrieve (OPTIONAL)
+ *  - xt_version : version of the object to retrieve (OPTIONAL)
+ *                 if 0, get the most recent object. Otherwise, the object with
+ *                 the matching version is returned if it exists
  *
- * Individual completion notifications are issued via xd_callback.
- * This function returns the first encountered error or 0 if all
- * sub-operations have succeeded.
+ * xt_attrs is filled with the retrieved metadata.
  *
- * @return              0 on success or -errno on failure.
+ * \param[in,out]  xfers  List of Xfer descriptors
+ * \param[in]      n      Number of Xfer descriptors
+ * \param[in]      cb     Optional completion callback per Xfer
+ * \param[in]      udata  User data passed to cb
+
+ * @return                0 on success or -errno on failure.
  *
  * This must be called after phobos_init.
  */
@@ -373,9 +436,27 @@ int phobos_setmd(struct pho_xfer_desc *xfers, size_t num_xfers);
  * of the last copy of an object is done by doing a phobos_delete with no flag
  * or the flag PHO_XFER_OBJ_HARD_DEL.
  *
- * The objid, objuuid and version inside a xfer_target can be used to select
- * on which object the delete operation will operate.
+ * Each Xfer must describe a DEL operation and provide ONLY one target. A target
+ * must provide:
+ *  - xt_objid   : the target object identifier
+ *  - xt_objuuid : uuid of the object, not used with a soft delete. (OPTIONAL)
+ *  - xt_version : version of the object, not used with a soft delete
+ *                 (OPTIONAL)
  *
+ * The scope inside the DEL xd_params MUST be set. See the pho_xfer_del_params.
+ *
+ * If the scope is alive, Phobos will search the object in the alive table with
+ * the oid, uuid and version specified.
+ *
+ * If the scope is deprecated, Phobos will search the object in the deprecated
+ * table with the oid, uuid and version specified. If there are many objects
+ * available with the provided filter it will fail. The uuid or version must be
+ * added to resolve this conflict.
+ *
+ * If the scope is all, Phobos will search the object in the alive table first
+ * and then in the deprecated table. Phobos will apply the rules described
+ * above.
+
  * @param[in]   xfers       Objects or copies to delete
  * @param[in]   num_xfers   Number of objects or copies to delete
  *
@@ -389,6 +470,10 @@ int phobos_delete(struct pho_xfer_desc *xfers, size_t num_xfers);
  * Undelete a deprecated object from the object store
  *
  * The latest version of each deprecated object is moved back.
+ *
+ * Each Xfer descriptor must provide ONLY one target. A target must provide:
+ *  - xt_objid   : the target object identifier
+ *  - xt_objuuid : uuid of the object to undelete (OPTIONAL)
  *
  * @param[in]   xfers       Objects to undelete, only the uuid field is used
  * @param[in]   num_xfers   Number of objects to undelete
@@ -475,44 +560,44 @@ int phobos_rename(const char *old_oid, const char *uuid, char *new_oid);
 
 /**
  * Copy N objects
- * desc contains:
- * - objid:   identifier of the object to copy, this is mandatory.
  *
- * - objuuid: uuid of the object to retrieve
- *            if not NULL, this field is duplicated internally and freed by
- *            pho_xfer_desc_clean(). The caller have to make sure to keep
- *            a copy of this pointer if it needs to be freed.
- *            if NULL and there is an object alive, get the current generation
- *            if NULL and there is no object alive, check the deprecated
- *            objects:
- *                if they all share the same uuid, the object matching
- *                the version criteria is retrieved
+ * Each Xfer descriptor must describe a COPY operation and provide ONLY one
+ * target. A target must provide:
+ *   - xt_objid   : identifier of the object to copy (MANDATORY)
+ *   - xt_objuuid : uuid of the object to copy
+ *                  if not NULL, this field is duplicated internally and freed
+ *                  by pho_xfer_desc_clean(). The caller have to make sure to
+ *                  keep a copy of this pointer if it needs to be freed.
+ *  - xt_version  : version of the object to copy
+ *  - Other target attributes are unused.
  *
- * - version: version of the object to retrieve
- *            if 0, get the most recent object. Otherwise, the object with the
- *            matching version is returned if it exists
- *            if there is an object in the object table and its version does
- *            not match, phobos_get() will target the current generation and
- *            query the deprecated_object table
+ * The PUT parameters inside the `pho_xfer_copy_params` can be specified.
+ * ONLY the grouping cannot be specify because it is inherited from the
+ * existing object. See the `pho_xfer_put_params`.
  *
- * - layout_name: (optional) name of the layout module to use
- * - size: unused
- * - fd: unused
- * - attrs: unused (can be NULL)
- * - flags: behavior flags
- * - tags: tags defining constraints on which media can be selected to put the
- *   data
+ * The copy_name in the GET params can also be set to select which source copy
+ * to duplicate.
  *
- * If objuuid and version are NULL and 0, phobos_get() will only query the
- * object table. Otherwise, the object table is queried first and then the
- * deprecated_object table.
+ * The scope in the GET params inside the `pho_xfer_copy_params` MUST be set.
+ * See the `pho_xfer_get_params`.
  *
- * Other fields are not used.
+ * If the scope is alive, Phobos will search the object in the alive table with
+ * the oid, uuid and version specified.
  *
- * Individual completion notifications are issued via xd_callback.
- * This function returns the first encountered error or 0 if all
- * sub-operations have succeeded.
+ * If the scope is deprecated, Phobos will search the object in the deprecated
+ * table with the oid, uuid and version specified. If there are many objects
+ * available with the provided filter it will fail. The uuid or version must be
+ * also specified.
  *
+ * If the scope is all, Phobos will search the object in the alive table first
+ * and then in the deprecated table. Phobos will apply the rules described
+ * above.
+ *
+ * \param[in,out]  xfers  List of Xfer descriptors
+ * \param[in]      n      Number of Xfer descriptors
+ * \param[in]      cb     Optional completion callback per Xfer
+ * \param[in]      udata  User data passed to cb
+
  * @return              0 on success or -errno on failure.
  *
  * This must be called after phobos_init.
@@ -563,10 +648,11 @@ struct pho_list_filters {
  *
  * The caller must release the list calling phobos_store_object_list_free().
  *
- * \param[in]       filters         The filters to use
+ * \param[in]       filters         The filters to use.
  * \param[in]       scope           List only/also the deprecated objects.
  * \param[out]      objs            Retrieved objects.
  * \param[out]      n_objs          Number of retrieved items.
+ * \param[in]       sort            The sort filters to use.
  *
  * \return                          0     on success,
  *                                 -errno on failure.
