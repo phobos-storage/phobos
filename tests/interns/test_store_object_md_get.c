@@ -127,7 +127,11 @@ static void assert_xfer_in_state(const struct test_state *state,
     assert_string_equal(gstr->str, obj->user_md);
     g_string_free(gstr, true);
 
-    assert_string_equal(state->xfer.xd_targets->xt_objid,   obj->oid);
+    if (state->xfer.xd_targets->xt_objid)
+        assert_string_equal(state->xfer.xd_targets->xt_objid, obj->oid);
+    else
+        assert_null(state->xfer.xd_targets->xt_objid);
+
     assert_string_equal(state->xfer.xd_targets->xt_objuuid, obj->uuid);
 
     assert_int_equal(state->xfer.xd_targets->xt_version, obj->version);
@@ -137,13 +141,18 @@ static void assert_xfer_in_state(const struct test_state *state,
 static void update_state_xfer(struct test_state *state, char *oid, char *uuid,
                               int version)
 {
-    state->xfer.xd_targets->xt_objid = oid;
-    state->xfer.xd_targets->xt_objuuid = uuid;
     state->xfer.xd_targets->xt_version = version;
+
+    free(state->xfer.xd_targets->xt_objid);
+    state->xfer.xd_targets->xt_objid = oid ? xstrdup(oid) : NULL;
+
+    free(state->xfer.xd_targets->xt_objuuid);
+    state->xfer.xd_targets->xt_objuuid = uuid ? xstrdup(uuid) : NULL;
 }
 
 static void clean_state_xfer(struct test_state *state)
 {
+    free(state->xfer.xd_targets->xt_objid);
     free(state->xfer.xd_targets->xt_objuuid);
     pho_attrs_free(&state->xfer.xd_targets->xt_attrs);
 
@@ -172,6 +181,7 @@ static void check_omg_fails_with_rc(struct test_state *state,
     update_state_xfer(state, oid, uuid, version);
     rc = object_md_get(state->dss, state->xfer.xd_targets);
     assert_int_equal(rc, expected_rc);
+    clean_state_xfer(state);
 }
 
 /*
@@ -192,44 +202,52 @@ static void omg_alive_object(void **void_state)
     /* get alive object */
     get_xfer_and_check_res(state, 0, "oid1", NULL, 0);
 
-    /* since uuid and version are not used, make sure that they are correctly
-     * overwitten and that the call doesn't fail
-     */
+    /* valid uuid/version must succeed*/
     get_xfer_and_check_res(state, 0, "oid1", "uuid1",  0);
     get_xfer_and_check_res(state, 0, "oid1", "uuid1",  1);
-    get_xfer_and_check_res(state, 0, "oid1", "uuid1", 10);
-    get_xfer_and_check_res(state, 0, "oid1", "uuid6",  0);
-    get_xfer_and_check_res(state, 0, "oid1",    NULL,  4);
+
+    /* invalid uuid/version must fail */
+    check_omg_fails_with_rc(state, "oid1", "uuid1", 10, -ENOENT);
+    check_omg_fails_with_rc(state, "oid1", "uuid6",  0, -ENOENT);
+    check_omg_fails_with_rc(state, "oid1",    NULL,  4, -ENOENT);
+}
+
+static void omg_deprecated_object(void **void_state)
+{
+    struct test_state *state = (struct test_state *)*void_state;
+
+    /* get deprecated object explicitly by uuid */
+    get_xfer_and_check_res(state, 1, "oid2", "uuid2", 0);
+
+    /* exact uuid + version must succeed*/
+    get_xfer_and_check_res(state, 1, "oid2", "uuid2", 1);
+
+    /* invalid uuid/version should fail */
+    check_omg_fails_with_rc(state, "oid2", "uuid2", 2, -ENOENT);
+    check_omg_fails_with_rc(state, "oid2", "uuid6", 1, -ENOENT);
 }
 
 static void omg_enoent(void **void_state)
 {
     struct test_state *state = (struct test_state *)*void_state;
 
-    /* check that the call fails with a deprecated object */
-    check_omg_fails_with_rc(state, "oid2", NULL, 0, -ENOENT);
-
     /* check that the call fails with no oid */
     check_omg_fails_with_rc(state, NULL,    NULL, 0, -ENOENT);
-    check_omg_fails_with_rc(state, NULL, "uuid1", 0, -ENOENT);
     check_omg_fails_with_rc(state, NULL,    NULL, 1, -ENOENT);
-    check_omg_fails_with_rc(state, NULL, "uuid1", 1, -ENOENT);
-}
 
-static void omg_filter_build_fail(void **void_state)
-{
-    struct test_state *state = (struct test_state *)*void_state;
+    /* uuid-only should be allowed when oid is absent */
+    get_xfer_and_check_res(state, 0, NULL, "uuid1", 0);
 
-    /* check that the function returns if dss_filter_build fails */
-    check_omg_fails_with_rc(state, "oid1\"", NULL, 0, -EINVAL);
+    /* still fail when no identifier is provided */
+    check_omg_fails_with_rc(state, NULL, "uuid-missing", 0, -ENOENT);
 }
 
 int main(void)
 {
     const struct CMUnitTest object_md_save_test_cases[] = {
         cmocka_unit_test(omg_alive_object),
+        cmocka_unit_test(omg_deprecated_object),
         cmocka_unit_test(omg_enoent),
-        cmocka_unit_test(omg_filter_build_fail),
     };
     struct pho_xfer_target target = {0};
 

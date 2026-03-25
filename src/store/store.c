@@ -448,40 +448,33 @@ static int processor_communicate(struct pho_data_processor *proc,
  */
 int object_md_get(struct dss_handle *dss, struct pho_xfer_target *xfer)
 {
-    struct dss_filter filter;
+    const char *id = xfer->xt_objid ? xfer->xt_objid : xfer->xt_objuuid;
     struct object_info *obj;
-    int obj_cnt;
-    int rc;
+    int rc = 0;
+
+    if (!xfer->xt_objid && !xfer->xt_objuuid)
+        LOG_RETURN(-ENOENT, "Either OID or UUID must be provided");
 
     ENTRY;
 
-    rc = dss_filter_build(&filter, "{\"DSS::OBJ::oid\": \"%s\"}",
-                          xfer->xt_objid);
+    rc = dss_lazy_find_object(dss, xfer->xt_objid, xfer->xt_objuuid,
+                              xfer->xt_version, &obj);
     if (rc)
-        return rc;
+        LOG_RETURN(rc, "Cannot fetch object: '%s'", id);
 
-    rc = dss_object_get(dss, &filter, &obj, &obj_cnt, NULL);
+    rc = pho_json_to_attrs(&xfer->xt_attrs, obj->user_md);
     if (rc)
-        LOG_GOTO(filt_free, rc, "Cannot fetch objid:'%s'", xfer->xt_objid);
+        LOG_GOTO(DSS_FREE, rc, "Cannot convert attributes of object: '%s'", id);
 
-    assert(obj_cnt <= 1);
+    if (!xfer->xt_objid)
+        xfer->xt_objid = xstrdup(obj->oid);
 
-    if (obj_cnt == 0)
-        LOG_GOTO(out_free, rc = -ENOENT, "No such object objid:'%s'",
-                 xfer->xt_objid);
-
-    rc = pho_json_to_attrs(&xfer->xt_attrs, obj[0].user_md);
-    if (rc)
-        LOG_GOTO(out_free, rc, "Cannot convert attributes of objid:'%s'",
-                 xfer->xt_objid);
-
+    free(xfer->xt_objuuid);
     xfer->xt_objuuid = xstrdup(obj->uuid);
     xfer->xt_version = obj->version;
 
-out_free:
-    dss_res_free(obj, obj_cnt);
-filt_free:
-    dss_filter_free(&filter);
+DSS_FREE:
+    object_info_free(obj);
     return rc;
 }
 
@@ -1879,6 +1872,19 @@ int phobos_getmd(struct pho_xfer_desc *xfers, size_t n,
         xfers[i].xd_rc = 0;
         for (j = 0; j < xfers[i].xd_ntargets; j++)
             xfers[i].xd_targets[j].xt_rc = 0;
+        /* If the uuid is given by the user, we don't own that memory.
+         * The simplest solution is to duplicate it here so that it can
+         * be freed at the end by pho_xfer_desc_clean().
+         *
+         * The user of this function must free any allocated string passed to
+         * the xfer.
+         *
+         * For the Python CLI, the garbage collector will take care of
+         * this pointer.
+         */
+        if (xfers[i].xd_targets->xt_objuuid)
+            xfers[i].xd_targets->xt_objuuid =
+                xstrdup(xfers[i].xd_targets->xt_objuuid);
     }
 
     return phobos_xfer(xfers, n, cb, udata);

@@ -300,8 +300,13 @@ int phobos_get(struct pho_xfer_desc *xfers, size_t n,
  * Retrieve N file metadata from the object store
  * desc contains:
  * - objid: identifier of the object to retrieve
+ * - objuuid: uuid of the object to retrieve
  * - attrs: unused (can be NULL)
  * - flags: behavior flags
+ * - version: version of the object to retrieve
+ *            if 0, get the most recent object. Otherwise, the object with the
+ *            matching version is returned if it exists
+ *
  * Other fields are not used.
  *
  * Individual completion notifications are issued via xd_callback.
