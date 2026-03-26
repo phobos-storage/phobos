@@ -1,0 +1,177 @@
+
+#!/usr/bin/env bash
+
+#
+#  All rights reserved (c) 2014-2025 CEA/DAM.
+#
+#  This file is part of Phobos.
+#
+#  Phobos is free software: you can redistribute it and/or modify it under
+#  the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation, either version 2.1 of the License, or
+#  (at your option) any later version.
+#
+#  Phobos is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU Lesser General Public License for more details.
+#
+#  You should have received a copy of the GNU Lesser General Public License
+#  along with Phobos. If not, see <http://www.gnu.org/licenses/>.
+#
+
+#
+# Integration test for getmd commands
+#
+
+test_dir=$(dirname $(readlink -e $0))
+. $test_dir/test_env.sh
+. $test_dir/setup_db.sh
+. $test_dir/test_launch_daemon.sh
+
+function dir_setup
+{
+    DIR="$(mktemp -d /tmp/test.pho.XXXX)"
+    $phobos dir add $DIR
+    $phobos dir format --fs posix --unlock $DIR
+}
+
+function setup
+{
+    setup_tables
+    invoke_lrs
+    dir_setup
+}
+
+function cleanup
+{
+    waive_lrs
+    rm -rf $DIR
+    drop_tables
+}
+
+function test_getmd()
+{
+    local md="a=1,b=2"
+    local oid=test_getmd_oid
+
+    $phobos put --family dir --metadata $md /etc/hosts $oid
+
+    local uuid=$($valg_phobos object list -o uuid) ||
+        error "List uuid operation failed"
+
+    local output=$($valg_phobos getmd $oid) ||
+        error "Getmd operation failed"
+    if [[ ! "$output" == "$md" ]]; then
+        error "Metadata mismatch: expected '$md', got '$output'"
+    fi
+
+    output=$($valg_phobos getmd --version 1 $oid) ||
+        error "Getmd with --version failed"
+
+    if [[ ! "$output" == "$md" ]]; then
+        error "Metadata mismatch with version: expected '$md', got '$output'"
+    fi
+
+    output=$($valg_phobos getmd --uuid $uuid $oid) ||
+        error "Getmd with --uuid failed"
+
+    if [[ ! "$output" == "$md" ]]; then
+        error "Metadata mismatch with version: expected '$md', got '$output'"
+    fi
+
+    $valg_phobos delete $oid || error "Delete operation failed"
+}
+
+function test_getmd_version()
+{
+    local md1="a=1,b=2"
+    local md2="c=3,d=4"
+    local oid=test_getmd_oid_uuid
+
+    $phobos put --family dir --metadata $md1 /etc/hosts $oid
+    $phobos put --family dir --metadata $md2 /etc/hosts $oid --overwrite
+
+    local output=$($valg_phobos getmd $oid) ||
+        error "Getmd operation failed"
+    if [[ ! "$output" == "$md2" ]]; then
+        error "Metadata mismatch: expected '$md2', got '$output'"
+    fi
+
+    output=$($valg_phobos getmd --version 1 $oid) ||
+        error "Getmd with --version 1 failed"
+
+    if [[ ! "$output" == "$md1" ]]; then
+        error "Metadata mismatch with version: expected '$md1', got '$output'"
+    fi
+
+    output=$($valg_phobos getmd --version 2 $oid) ||
+        error "Getmd with --version 2 failed"
+
+    if [[ ! "$output" == "$md2" ]]; then
+        error "Metadata mismatch with version: expected '$md2', got '$output'"
+    fi
+
+    $valg_phobos delete $oid || error "Delete operation failed"
+}
+
+function test_getmd_uuid()
+{
+    local md1="a=1,b=2"
+    local md2="c=3,d=4"
+    local oid=test_getmd_oid_uuid
+
+    $phobos put --family dir --metadata $md1 /etc/hosts $oid
+
+    local uuid=$($valg_phobos object list -o uuid) ||
+        error "List uuid operation failed"
+
+    $valg_phobos delete $oid || error "Delete operation failed"
+
+    $phobos put --family dir --metadata $md2 /etc/os-release $oid
+
+    local output=$($valg_phobos getmd $oid) ||
+        error "Getmd operation failed"
+    if [[ ! "$output" == "$md2" ]]; then
+        error "Metadata mismatch: expected '$md2', got '$output'"
+    fi
+
+    output=$($valg_phobos getmd --uuid $uuid $oid) ||
+        error "Getmd with --uuid failed"
+
+    if [[ ! "$output" == "$md1" ]]; then
+        error "Metadata mismatch with version: expected '$md1', got '$output'"
+    fi
+
+    $valg_phobos delete $oid || error "Delete operation failed"
+}
+
+function test_getmd_no_id()
+{
+    local md="a=1,b=2"
+    local oid=test_getmd_oid_no_id
+
+    $phobos put --family dir --metadata $md /etc/hosts $oid
+    local uuid=$($valg_phobos object list -o uuid) ||
+        error "List uuid operation failed"
+
+    $valg_phobos getmd 2>/dev/null &&
+        error "getmd succeeded without OID/UUID"
+
+    local output=$($valg_phobos getmd --uuid $uuid) ||
+        error "Getmd with only --uuid $uuid failed"
+
+    if [[ ! "$output" == "$md" ]]; then
+        error "Metadata mismatch for uuid: expected '$md', got '$output'"
+    fi
+
+    $valg_phobos delete $oid || error "Delete operation failed"
+}
+
+TESTS=("setup; \
+        test_getmd; \
+        test_getmd_version; \
+        test_getmd_uuid; \
+        test_getmd_no_id; \
+        cleanup")
+

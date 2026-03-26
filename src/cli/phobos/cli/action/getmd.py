@@ -32,5 +32,8 @@ class GetMDOptHandler(ActionOptHandler):
     def add_options(cls, parser):
         """Add options for the GETMD command."""
         super(GetMDOptHandler, cls).add_options(parser)
-        parser.add_argument('object_id', help='Object to target')
+        parser.add_argument('object_id', help='Object to target', nargs='?')
+        parser.add_argument('--uuid', help='UUID of the object')
+        parser.add_argument('--version', help='Version of the object',
+                            type=int, default=0)
         parser.set_defaults(verb=cls.label)

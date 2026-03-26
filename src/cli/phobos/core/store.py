@@ -498,6 +498,9 @@ class XferDescriptor(Structure): # pylint: disable=too-many-instance-attributes
             self.xd_targets[0].xt_objuuid = desc[2][0]
             self.xd_targets[0].xt_version = desc[2][1]
             self.xd_params.get = XferGetParams(GetParams(copy_name=desc[2][2]))
+        elif self.xd_op == PHO_XFER_OP_GETMD:
+            self.xd_targets[0].xt_objuuid = desc[2][0]
+            self.xd_targets[0].xt_version = desc[2][1]
         elif self.xd_op == PHO_XFER_OP_COPY:
             self.xd_params.copy = desc[2]
 
@@ -589,10 +592,10 @@ class XferClient: # pylint: disable=too-many-instance-attributes
     def noop_compl_cb(self, *args, **kwargs):
         """Default, empty transfer completion handler."""
 
-    def getmd_register(self, oid, data_path, attrs=None):
+    def getmd_register(self, oid, data_path, uuid, version, attrs=None):
         """Enqueue a GETMD transfer."""
-        self.getmd_session.append(([(oid, data_path, attrs)], 0, None,
-                                   PHO_XFER_OP_GETMD))
+        self.getmd_session.append(([(oid, data_path, attrs)], 0,
+                                   (uuid, version), PHO_XFER_OP_GETMD))
 
     def get_register(self, oid, data_path, get_args, best_host, attrs=None):
         # pylint: disable=too-many-arguments

@@ -128,8 +128,18 @@ class StoreGetMDOptHandler(XferOptHandler):
     def exec_getmd(self):
         """Retrieve an object attributes from backend."""
         oid = self.params.get('object_id')
-        self.logger.debug("Retrieving attrs for 'objid:%s'", oid)
-        self.client.getmd_register(oid, None)
+        version = self.params.get('version')
+        uuid = self.params.get('uuid')
+
+        if not oid and not uuid:
+            self.logger.error("either 'object_id' or '--uuid' must be \
+                               provided")
+            sys.exit(os.EX_USAGE)
+
+        self.logger.debug("Retrieving metadata for '%s'",
+                          f'objid: {oid}' if oid else f'uuid:{uuid}')
+        self.client.getmd_register(oid, None, uuid, version)
+
         try:
             self.client.run(compl_cb=self._compl_notify)
         except IOError as err:

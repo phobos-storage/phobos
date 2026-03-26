@@ -57,6 +57,7 @@ check_SCRIPTS=acceptance.test \
               test_file_after_put.test \
               test_format.test \
               test_get.test \
+              test_getmd.test \
               test_group_sync.sh \
               test_grouping.test \
               test_hsm_sync_dir.test \
