@@ -67,3 +67,18 @@ function wait_for_lrs()
         sleep 0.1
     done
 }
+
+function fill_dir()
+{
+    local file=$1
+    local dir=$2
+
+    local dev=$(df --output=source $dir | tail -n1)
+    local block_size=$(blockdev --getbsz $dev)
+    export PHOBOS_IO_fs_block_size="dir=$block_size"
+
+    local free_size=$($phobos dir list -o stats.phys_spc_free $dir)
+    local nb_block=$(( ($free_size / $block_size) - 3))
+
+    dd if=/dev/urandom of=$file bs=$block_size count=$nb_block
+}

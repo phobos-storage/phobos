@@ -952,8 +952,13 @@ static int lrs_dev_media_update(struct lrs_dev *dev, size_t size_written,
             media_info->stats.phys_spc_used = space.spc_used;
             media_info->stats.phys_spc_free = space.spc_avail;
             fields |= PHYS_SPC_USED | PHYS_SPC_FREE;
+
             if (media_info->stats.phys_spc_free == 0) {
                 media_info->fs.status = PHO_FS_STATUS_FULL;
+                fields |= FS_STATUS;
+            } else if (media_info->stats.phys_spc_free > 0 &&
+                       media_info->fs.status == PHO_FS_STATUS_FULL) {
+                media_info->fs.status = PHO_FS_STATUS_USED;
                 fields |= FS_STATUS;
             }
         }

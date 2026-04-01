@@ -59,6 +59,7 @@ function cleanup() {
 function setup_dir()
 {
     setup
+
     umask 000
     export dirs=(
                  $(mktemp -d "$PWD/pho.test.XXXX")
@@ -99,6 +100,20 @@ function setup_dir_bis()
     $phobos dir add --unlock ${dirs[1]} --library lib2
 }
 
+function setup_dir_1M()
+{
+    setup
+    setup_test_dirs
+
+    export dirs=(
+                 $(make_tmp_fs 1M)
+                 $(make_tmp_fs 1M)
+                 )
+
+    $phobos dir add --unlock ${dirs[@]}
+    $phobos dir format --unlock ${dirs[@]}
+}
+
 function setup_tape()
 {
     setup
@@ -126,6 +141,12 @@ function cleanup_dir()
 {
     cleanup
     rm -rf ${dirs[@]}
+}
+
+function cleanup_dir_1M()
+{
+    cleanup_dir
+    cleanup_test_dirs
 }
 
 function cleanup_dir_log()
@@ -368,6 +389,71 @@ function test_dir_list_path()
     $valg_phobos dir list "${dirs[0]}/" | grep "${dirs[0]}"
 }
 
+function test_dir_status_full()
+{
+    local file=$(mktemp $DIR_TEST_IN/test.pho.XXXX)
+    fill_dir $file ${dirs[0]}
+
+    $phobos put -f dir $file oid
+
+    local dir_space="$($valg_phobos dir list -o stats.phys_spc_free ${dirs[0]})"
+    if [[ $dir_space -ne 0 ]]; then
+        error "The space free on ${dirs[0]} should be 0, got $dir_space"
+    fi
+
+    local dir_status="$($valg_phobos dir list -o fs.status ${dirs[0]})"
+    if [[ $dir_status != "full" ]]; then
+        error "The status on ${dirs[0]} should be full, got $dir_status"
+    fi
+
+    $phobos delete --hard oid
+    dir_space="$($valg_phobos dir list -o stats.phys_spc_free ${dirs[0]})"
+    if [[ $dir_space -eq 0 ]]; then
+        error "The space free on ${dirs[0]} should be greater than 0," \
+              "got $dir_space"
+    fi
+
+    dir_status="$($valg_phobos dir list -o fs.status ${dirs[0]})"
+    if [[ $dir_status != "used" ]]; then
+        error "The status on ${dirs[0]} should be used, got $dir_status"
+    fi
+}
+
+function test_dir_status_full_with_copy()
+{
+    local file=$(mktemp $DIR_TEST_IN/test.pho.XXXX)
+
+    fill_dir $file ${dirs[0]}
+
+    $phobos dir lock ${dirs[1]}
+    $phobos put -f dir $file oid
+    $phobos dir unlock ${dirs[1]}
+
+    $phobos copy create -f dir oid copy
+    local dir_space="$($valg_phobos dir list -o stats.phys_spc_free ${dirs[1]})"
+    if [[ $dir_space -ne 0 ]]; then
+        error "The space free on ${dirs[1]} should be 0, got $dir_space"
+    fi
+
+    local dir_status="$($valg_phobos dir list -o fs.status ${dirs[1]})"
+    if [[ $dir_status != "full" ]]; then
+        error "The status on ${dirs[1]} should be full, got $dir_status"
+    fi
+
+    $phobos copy delete oid copy
+
+    dir_space="$($valg_phobos dir list -o stats.phys_spc_free ${dirs[1]})"
+    if [[ $dir_space -eq 0 ]]; then
+        error "The space free on ${dirs[1]} should be greater than 0," \
+              "got $dir_space"
+    fi
+
+    dir_status="$($valg_phobos dir list -o fs.status ${dirs[1]})"
+    if [[ $dir_status != "used" ]]; then
+        error "The status on ${dirs[1]} should be used, got $dir_status"
+    fi
+}
+
 ################################################################################
 #                              TEST MEDIA LOCK                                 #
 ################################################################################
@@ -487,7 +573,11 @@ TESTS=("setup_dir; \
        "setup_dir_bis; \
             test_dir_list_library; \
             test_dir_list_status; \
-        cleanup_dir")
+        cleanup_dir"
+       "setup_dir_1M; \
+           test_dir_status_full; \
+           test_dir_status_full_with_copy; \
+        cleanup_dir_1M")
 
 if [[ -w /dev/changer ]]; then
     TESTS+=("setup_tape; test_put_update_tape; cleanup_tape"
