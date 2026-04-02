@@ -311,6 +311,8 @@ static int dss_generic_update(struct dss_handle *handle, enum dss_type type,
 {
     PGconn *conn = handle->dh_conn;
     GString *request;
+    PGresult *res;
+    int updated;
     int rc = 0;
 
     ENTRY;
@@ -329,7 +331,14 @@ static int dss_generic_update(struct dss_handle *handle, enum dss_type type,
     if (rc)
         LOG_GOTO(out_cleanup, rc, "SQL request build failed");
 
-    rc = execute_and_commit_or_rollback(conn, request, NULL, PGRES_COMMAND_OK);
+    rc = execute_and_commit_or_rollback(conn, request, &res, PGRES_COMMAND_OK);
+
+    updated = strtol(PQcmdTuples(res), NULL, 10);
+    if (updated == 0)
+        pho_warn("No rows were updated by the update. The target row may not "
+                 "exist or may not match the WHERE condition");
+
+    PQclear(res);
 
 out_cleanup:
     g_string_free(request, true);

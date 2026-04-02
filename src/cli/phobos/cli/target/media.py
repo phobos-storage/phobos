@@ -154,6 +154,9 @@ class MediaSetAccessOptHandler(ActionOptHandler):
         )
         parser.add_argument('res', nargs='+', metavar='RESOURCE',
                             help='Resource(s) to update access mode')
+        parser.add_argument('--library',
+                            help="Library containing the medium to update "
+                                 "access mode")
         parser.formatter_class = argparse.RawDescriptionHelpFormatter
 
 
@@ -170,6 +173,8 @@ class MediaUpdateOptHandler(ActionOptHandler):
                             help='New tags for this media (comma-separated, '
                                  'e.g. "-T foo,bar"), empty string to clear '
                                  'tags, new tags list overwrite current tags')
+        parser.add_argument('--library',
+                            help="Library containing the medium to update")
         parser.add_argument('res', nargs='+', help='Resource(s) to update')
 
 

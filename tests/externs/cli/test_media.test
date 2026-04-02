@@ -209,6 +209,39 @@ function test_put_update_dir_path()
     test_put_update "dir" "${dirs[0]}/" "dir_obj"
 }
 
+function test_update_library()
+{
+    local family=$1
+    local media_name=$2
+
+    # Should not add the tag as it doesn't find the medium
+    $valg_phobos $family update --tags first_tag $media_name 2>&1 |
+        grep "No rows were updated"
+
+    local tags="$($phobos $family list -o tags $media_name)"
+    if [[ "$tags" != "[]" ]]; then
+        error "The tags shouldn't be updated"
+    fi
+
+    $valg_phobos $family update --tags first_tag --library lib1 $media_name ||
+        error "Should have succeed"
+
+    tags="$($phobos $family list -o tags $media_name)"
+    if [[ "$tags" != "['first_tag']" ]]; then
+        error "The tags should have been updated"
+    fi
+}
+
+function test_dir_update_library()
+{
+    test_update_library "dir" "${dirs[0]}"
+}
+
+function test_tape_update_library()
+{
+    test_update_library "tape" "${tapes[0]}"
+}
+
 ################################################################################
 #                     TEST UPDATE OF MEDIA OPERATION FLAGS                     #
 ################################################################################
@@ -259,6 +292,36 @@ function test_set_access()
 
     $valg_phobos dir set-access +PD ${dirs[0]}
     test_dir_operation_flags ${dirs[0]} True True True
+}
+
+function test_set_access_library()
+{
+    local family=$1
+    local media_name=$2
+
+    # Should not update the put_access as it doesn't found the medium
+    $valg_phobos $family set-access -- -P $media_name 2>&1 |
+        grep "No rows were updated"
+    local access="$($phobos $family list -o put_access $media_name)"
+    if [[ "$access" != "True" ]]; then
+        error "Should be True"
+    fi
+
+    $valg_phobos $family set-access --library lib1 -- -P $media_name
+    access="$($phobos $family list -o put_access $media_name)"
+    if [[ "$access" != "False" ]]; then
+        error "Should be False"
+    fi
+}
+
+function test_dir_set_access_library()
+{
+    test_set_access_library "dir" "${dirs[0]}"
+}
+
+function test_tape_set_access_library()
+{
+    test_set_access_library "tape" "${tapes[0]}"
 }
 
 function test_set_access_path()
@@ -573,6 +636,8 @@ TESTS=("setup_dir; \
        "setup_dir_bis; \
             test_dir_list_library; \
             test_dir_list_status; \
+            test_dir_update_library; \
+            test_dir_set_access_library; \
         cleanup_dir"
        "setup_dir_1M; \
            test_dir_status_full; \
@@ -584,6 +649,8 @@ if [[ -w /dev/changer ]]; then
             "setup_tape_bis; \
                 test_tape_list_library; \
                 test_tape_list_status; \
+                test_tape_update_library; \
+                test_tape_set_access_library; \
             cleanup_tape"
             "setup_tape; test_tape_rename_lib_with_extent; cleanup_tape")
 fi
