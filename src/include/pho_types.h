@@ -538,6 +538,9 @@ struct media_info {
                                            */
 };
 
+/*
+ * Copy status must be ordered from the worst readable to the best one.
+ */
 enum copy_status {
     PHO_COPY_STATUS_INVAL = -1,
     PHO_COPY_STATUS_INCOMPLETE = 0,  /**< Copy has not enough splits */

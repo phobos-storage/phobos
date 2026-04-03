@@ -753,45 +753,87 @@ static int get_copy_from_dss(struct dss_handle *handle, const char *uuid,
     return 0;
 }
 
+/**
+ * If a not incomplete copy_name copy is founded, *copy is updated.
+ * If an incomplete copy_name copy is founded, *copy_incomplete is updated
+ * if it was NULL.
+ */
+int get_update_copy_or_incomplete(struct dss_handle *handle, const char *uuid,
+                                  int version, const char *copy_name,
+                                  struct copy_info **copy,
+                                  struct copy_info **copy_incomplete)
+{
+    int rc = 0;
+
+    rc = get_copy_from_dss(handle, uuid, version, copy_name, copy);
+    if (*copy != NULL && rc == 0) {
+        if ((*copy)->copy_status == PHO_COPY_STATUS_INCOMPLETE) {
+            pho_warn("copy '%s' of (uuid '%s', version %d) is incomplete",
+                     copy_name, uuid, version);
+
+            if (!*copy_incomplete)
+                *copy_incomplete = *copy;
+            else
+                copy_info_free(*copy);
+
+            *copy = NULL;
+         }
+    }
+
+    return rc;
+}
+
 int dss_lazy_find_copy(struct dss_handle *handle, const char *uuid,
                        int version, const char *copy_name,
                        struct copy_info **copy)
 {
+    int best_copy_index[PHO_COPY_STATUS_LAST];
+    struct copy_info *copy_incomplete = NULL;
     struct copy_info *copy_list = NULL;
     const char *default_copy = NULL;
     char **preferred_order = NULL;
+    size_t preferred_count = 0;
     struct dss_filter filter;
     int copy_cnt = 0;
-    size_t count = 0;
     int rc = 0;
     int i;
 
     ENTRY;
 
+    *copy = NULL;
+
     if (copy_name) {
-        rc = get_copy_from_dss(handle, uuid, version, copy_name, copy);
+        rc = get_update_copy_or_incomplete(handle, uuid, version,
+                                           copy_name, copy, &copy_incomplete);
+        if (rc == 0 && copy_incomplete)
+            *copy = copy_incomplete;
+
         if (rc == 0 && *copy == NULL)
             pho_error(rc = -ENOENT,
                       "Cannot fetch copy '%s'", copy_name);
+
         return rc;
     }
 
-    rc = get_cfg_preferred_order(&preferred_order, &count);
+    rc = get_cfg_preferred_order(&preferred_order, &preferred_count);
     if (rc != 0 && rc != -ENODATA)
         return rc;
 
-    for (i = 0; i < count; ++i) {
-        rc = get_copy_from_dss(handle, uuid, version, preferred_order[i], copy);
-        if (*copy != NULL && rc == 0)
+    for (i = 0; i < preferred_count; ++i) {
+        rc = get_update_copy_or_incomplete(handle, uuid, version,
+                                           preferred_order[i], copy,
+                                           &copy_incomplete);
+        if (*copy)
             goto end;
     }
 
     rc = get_cfg_default_copy_name(&default_copy);
     if (rc)
-        LOG_RETURN(rc, "Cannot get default copy name from conf");
+        LOG_GOTO(end, rc, "Cannot get default copy name from conf");
 
-    rc = get_copy_from_dss(handle, uuid, version, default_copy, copy);
-    if (*copy != NULL && rc == 0)
+    rc = get_update_copy_or_incomplete(handle, uuid, version, default_copy,
+                                       copy, &copy_incomplete);
+    if (*copy)
         goto end;
 
     rc = dss_filter_build(&filter,
@@ -800,28 +842,60 @@ int dss_lazy_find_copy(struct dss_handle *handle, const char *uuid,
                           "     {\"DSS::COPY::version\": \"%d\"}"
                           "]}", uuid, version);
     if (rc)
-        LOG_RETURN(rc, "Cannot build filter");
+        LOG_GOTO(end, rc, "Cannot build copy filter");
 
     rc = dss_copy_get(handle, &filter, &copy_list, &copy_cnt, NULL);
     dss_filter_free(&filter);
     if (rc)
-        LOG_RETURN(rc, "Cannot fetch copy for objuuid:'%s'", uuid);
+        LOG_GOTO(end, rc, "Cannot fetch copy for objuuid:'%s'", uuid);
 
-    if (copy_cnt == 0)
-        LOG_RETURN(rc = -ENOENT,
-                   "Failed to find a copy of object with uuid '%s' and version '%d'."
-                   "Since it is registered in the database without any copy, you might want to delete it.",
-                   uuid, version);
+    for (i = 0; i < PHO_COPY_STATUS_LAST; i++)
+        best_copy_index[i] = -1;
 
-    *copy = copy_info_dup(&copy_list[0]);
+    for (i = 0; i < copy_cnt; i++) {
+        if (copy_list[i].copy_status == PHO_COPY_STATUS_COMPLETE) {
+            best_copy_index[PHO_COPY_STATUS_COMPLETE] = i;
+            break;
+        }
+
+        if (best_copy_index[copy_list[i].copy_status] == -1)
+            best_copy_index[copy_list[i].copy_status] = i;
+    }
+
+    for (i = PHO_COPY_STATUS_COMPLETE; i > PHO_COPY_STATUS_INCOMPLETE; i--) {
+        if (best_copy_index[i] >= 0) {
+            *copy = copy_info_dup(&copy_list[best_copy_index[i]]);
+            break;
+        }
+    }
+
+    if (!*copy && !copy_incomplete &&
+        best_copy_index[PHO_COPY_STATUS_INCOMPLETE] >= 0) {
+        *copy = copy_info_dup(
+                    &copy_list[best_copy_index[PHO_COPY_STATUS_INCOMPLETE]]);
+    }
 
     dss_res_free(copy_list, copy_cnt);
 
 end:
-    for (i = 0; i < count; ++i)
+    for (i = 0; i < preferred_count; ++i)
         free(preferred_order[i]);
     free(preferred_order);
 
+    if (!*copy) {
+        if (!copy_incomplete) {
+            pho_error(rc = -ENOENT,
+                      "Failed to find a copy of object with uuid '%s' and "
+                      "version '%d'. Since it is registered in the database "
+                      "without any copy, you might want to delete it.",
+                      uuid, version);
+        } else {
+            *copy = copy_incomplete;
+            copy_incomplete = NULL;
+        }
+    }
+
+    copy_info_free(copy_incomplete);
     return rc;
 }
 
