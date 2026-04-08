@@ -536,18 +536,20 @@ int object_md_save(struct dss_handle *dss, struct pho_xfer_target *xfer,
 
         rc = dss_object_get(dss, &filter, &obj_res, &obj_cnt, NULL);
         dss_filter_free(&filter);
-        if (rc || obj_cnt == 0) {
-            pho_verb("dss_object_get failed for objid:'%s'", xfer->xt_objid);
+        if (rc)
+            LOG_GOTO(out_unlock, rc, "Unable to check if objid:'%s' exists",
+                     obj.oid);
 
+        if (obj_cnt == 0) {
             /**
              * If we try overwritting an object that doesn't exist in the
              * object table, we treat the command as a normal
              * "object put", thus we insert the object we wanted to
              * overwrite with in the table.
              */
-            if (rc == 0)
-                pho_debug("Can't overwrite unexisting object:'%s'",
-                         xfer->xt_objid);
+            pho_debug("Overwrite was asked for the unexisting object:'%s'. "
+                      "Will simply create the object",
+                      obj.oid);
 
             rc = dss_object_insert(dss, &obj, 1, DSS_SET_INSERT);
             if (rc)

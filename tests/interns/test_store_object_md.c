@@ -384,8 +384,7 @@ static void oms_dss_object_insert_failure_with_fake_overwrite(void **state)
     will_return(pho_attrs_to_json, 0);
     will_return(dss_lock, 0);
     will_return(dss_filter_build, 0);
-    MOCK_DSS_OBJECT_GET(-ENOENT, 0);
-    will_return(dss_object_insert, -EINVAL);
+    MOCK_DSS_OBJECT_GET(-EINVAL, 0);
     will_return(dss_unlock, 0);
     rc = object_md_save(NULL, xfer.xd_targets, xfer.xd_params.put.overwrite,
                         NULL, NULL);
@@ -516,7 +515,7 @@ static void oms_success_with_fake_overwrite(void **state)
     will_return(pho_attrs_to_json, 0);
     will_return(dss_lock, 0);
     will_return(dss_filter_build, 0);
-    MOCK_DSS_OBJECT_GET(-ENOENT, 0);
+    MOCK_DSS_OBJECT_GET(0, 0);
     will_return(dss_object_insert, 0);
     will_return(dss_filter_build, 0);
     MOCK_DSS_OBJECT_GET(0, 1);
