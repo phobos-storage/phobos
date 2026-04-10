@@ -225,6 +225,26 @@ function test_last_locate_timestamp
         error "Format should have waited for locate expirancy"
 }
 
+function test_put_with_lock_expirancy
+{
+    local drive=$(get_lto_drives 5 1)
+    $phobos drive add --unlock $drive
+
+    local tapes=( $(get_tapes L5 1 | nodeset -e) )
+    $phobos tape add --type lto5 ${tapes[@]}
+    $phobos tape format --unlock ${tapes[0]}
+
+    waive_lrs
+
+    export PHOBOS_LRS_locate_lock_expirancy=5000
+
+    invoke_lrs
+
+    local oid=$(generate_prefix_id)
+    $phobos put /etc/hosts $oid ||
+        error "Error while putting $oid"
+}
+
 function test_locate_compatibility
 {
     local N_TAPES=2
@@ -490,6 +510,9 @@ if [[ -w /dev/changer ]]; then
 #             tape_cleanup")
     TESTS+=("tape_init_setup; \
              test_last_locate_timestamp; \
+             tape_cleanup");
+    TESTS+=("tape_init_setup; \
+             test_put_with_lock_expirancy; \
              tape_cleanup");
     TESTS+=("tape_init_setup; \
              test_locate_compatibility; \

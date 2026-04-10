@@ -1317,19 +1317,32 @@ static bool medium_is_write_compatible(struct media_info *medium,
     return true;
 }
 
-static bool check_locate_expirancy(struct media_info *medium,
+static bool check_locate_expirancy(struct dss_handle *handle,
+                                   struct media_info *medium,
                                    int lock_expirancy)
 {
     struct timespec expire;
+    struct pho_lock lock;
+    int rc;
 
-    expire.tv_nsec = medium->lock.last_locate.tv_usec * 1000 +
+    rc = dss_lock_status(handle, DSS_MEDIA, medium, 1, &lock);
+    if (rc) {
+        pho_warn("Failed to retrieve status for lock expirancy of "
+                 FMT_PHO_ID", will consider it expired",
+                 PHO_ID(medium->rsc.id));
+        return false;
+    }
+
+    expire.tv_nsec = lock.last_locate.tv_usec * 1000 +
         (lock_expirancy % 1000) * 1000000;
-    expire.tv_sec = medium->lock.last_locate.tv_sec + lock_expirancy / 1000;
+    expire.tv_sec = lock.last_locate.tv_sec + lock_expirancy / 1000;
 
     if (expire.tv_nsec >= 1000000000) {
         expire.tv_nsec %= 1000000000;
         expire.tv_sec += 1;
     }
+
+    free(lock.hostname);
 
     return !is_past(expire);
 }
@@ -1368,6 +1381,7 @@ typedef int (*device_select_func_t)(size_t required_size,
  *                                  (ignored if NULL)
  */
 struct lrs_dev *dev_picker(GPtrArray *devices,
+                           struct dss_handle *dss,
                            enum dev_op_status op_st,
                            const char *library,
                            const char *grouping,
@@ -1404,16 +1418,13 @@ struct lrs_dev *dev_picker(GPtrArray *devices,
         }
 
         if (lock_expirancy != 0 && itr->ld_dss_media_info) {
-            struct media_info *medium = lrs_medium_update(
-                &itr->ld_dss_media_info->rsc.id);
 
-            if (check_locate_expirancy(medium, lock_expirancy)) {
-                lrs_medium_release(medium);
+            if (check_locate_expirancy(dss, itr->ld_dss_media_info,
+                                       lock_expirancy)) {
                 pho_debug("Skipping device '%s' with reserved medium",
                           itr->ld_dev_path);
                 goto unlock_continue;
             }
-            lrs_medium_release(medium);
         }
 
         if (dev_is_failed(itr)) {

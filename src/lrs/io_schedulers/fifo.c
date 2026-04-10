@@ -320,8 +320,9 @@ static int find_read_device(struct io_scheduler *io_sched,
                                 medium->rsc.id.name, medium->rsc.id.library,
                                 &sched_ready);
     if (!*dev) {
-        *dev = dev_picker(io_sched->devices, PHO_DEV_OP_ST_UNSPEC,
-                          medium->rsc.id.library, NULL,
+        *dev = dev_picker(io_sched->devices,
+                          io_sched->io_sched_hdl->lock_handle->dss,
+                          PHO_DEV_OP_ST_UNSPEC, medium->rsc.id.library, NULL,
                           select_empty_loaded_mount, 0, &NO_STRING, medium,
                           false, false, NULL);
 
@@ -383,7 +384,9 @@ static int find_write_device(struct io_scheduler *io_sched,
 search_again:
     need_new_grouping = false;
     /* 1a) is there a mounted filesystem with enough room? */
-    *dev = dev_picker(io_sched->devices, PHO_DEV_OP_ST_MOUNTED, wreq->library,
+    *dev = dev_picker(io_sched->devices,
+                      io_sched->io_sched_hdl->lock_handle->dss,
+                      PHO_DEV_OP_ST_MOUNTED, wreq->library,
                       targeted_grouping, dev_select_policy, size, &tags, NULL,
                       true, wreq->media[index]->empty_medium,
                       &one_drive_available);
@@ -393,7 +396,9 @@ search_again:
         return 0;
 
     /* 1b) is there a loaded media with enough room? */
-    *dev = dev_picker(io_sched->devices, PHO_DEV_OP_ST_LOADED, wreq->library,
+    *dev = dev_picker(io_sched->devices,
+                      io_sched->io_sched_hdl->lock_handle->dss,
+                      PHO_DEV_OP_ST_LOADED, wreq->library,
                       targeted_grouping, dev_select_policy, size, &tags, NULL,
                       true, wreq->media[index]->empty_medium,
                       &one_drive_available);
@@ -435,7 +440,9 @@ search_again:
     }
 
 find_device:
-    *dev = dev_picker(io_sched->devices, PHO_DEV_OP_ST_UNSPEC, wreq->library,
+    *dev = dev_picker(io_sched->devices,
+                      io_sched->io_sched_hdl->lock_handle->dss,
+                      PHO_DEV_OP_ST_UNSPEC, wreq->library,
                       targeted_grouping, select_empty_loaded_mount, 0,
                       &NO_STRING, *medium, true, false, NULL);
     if (*dev)
@@ -464,7 +471,9 @@ static int find_format_device(struct io_scheduler *io_sched,
     *dev = search_in_use_medium(io_sched->io_sched_hdl->global_device_list,
                                 med_id->name, med_id->library, &sched_ready);
     if (!*dev) {
-        *dev = dev_picker(io_sched->devices, PHO_DEV_OP_ST_UNSPEC,
+        *dev = dev_picker(io_sched->devices,
+                          io_sched->io_sched_hdl->lock_handle->dss,
+                          PHO_DEV_OP_ST_UNSPEC,
                           med_id->library, NULL, select_empty_loaded_mount,
                           0, &NO_STRING, reqc->params.format.medium_to_format,
                           false, false, NULL);

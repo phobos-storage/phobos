@@ -409,6 +409,7 @@ int select_first_fit(size_t required_size,
                      struct lrs_dev **dev_selected);
 
 struct lrs_dev *dev_picker(GPtrArray *devices,
+                           struct dss_handle *dss,
                            enum dev_op_status op_st,
                            const char *library,
                            const char *grouping,
