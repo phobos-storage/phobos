@@ -1,9 +1,10 @@
-[hsm] - Configuring the HSM commands
-====================================
+[hsm "source_copy_name" "destination_copy_name"] - Configuring the HSM commands
+===============================================================================
 
 This section explains how to configure the HSM commands. These commands allow
 copying and moving objects between storage tier to achieve hierarchical storage
-management.
+management. There should be one section by couple of source and destination
+copy names.
 
 The phobos_hsm_sync_dir command creates a new destination copy for each
 object that has a source copy with extents on dirs owned by the host which
@@ -18,6 +19,9 @@ dir to decrease the fill rate under the **release_lower_threshold**. To be
 deleted, a "to release" copy must have an existing backend copy. The older
 copies are deleted first. "To release" copies with a creation time younger than
 "current_time - **release_delay_second**" are not deleted.
+
+The phobos_hsm_sync_dir and phobos_hsm_release_dir commands logs copies create
+or delete errors into the **error_log_path** file.
 
 *Recording and using the last synced time*
 ------------------------------------------
@@ -34,14 +38,14 @@ of format"YYYY-mm-dd HH:MM:SS.uuuuuu" as "2025-09-26 18:17:07.548048", always
 26 characters.
 
 If this parameter is not specified, Phobos defaults to the following:
-**synced_time_path = /var/lib/phobos/hsm_synced_ctime**.
+**synced_time_path = /var/lib/phobos/hsm_synced_ctime_source_destination**.
 
 Example:
 
 .. code:: ini
 
-    [hsm]
-    synced_time_path = /var/lib/phobos/hsm_synced_ctime
+    [hsm "source_copy_name" "destination_copy_name"]
+    synced_time_path = /var/lib/phobos/hsm_synced_ctime_source_destination
 
 The hsm sync command takes into account the registered date to filter the
 extents that it needs to check and updates this date.
@@ -64,7 +68,7 @@ Example:
 
 .. code:: ini
 
-    [hsm]
+    [hsm "source_copy_name" "destination_copy_name"]
     sync_delay_second = 3600
 
 *Release delay*
@@ -80,7 +84,7 @@ Example:
 
 .. code:: ini
 
-    [hsm]
+    [hsm "source_copy_name" "destination_copy_name"]
     release_delay_second = 1800
 
 *dir_release_higher_threshold*
@@ -98,7 +102,7 @@ Example:
 
 .. code:: ini
 
-    [hsm]
+    [hsm "source_copy_name" "destination_copy_name"]
     dir_release_higher_threshold = 95
 
 *dir_release_lower_threshold*
@@ -116,5 +120,25 @@ Example:
 
 .. code:: ini
 
-    [hsm]
+    [hsm "source_copy_name" "destination_copy_name"]
     dir_release_higher_threshold = 80
+
+*logging object copy create and delete errors*
+----------------------------------------------
+
+The **error_log_path** parameter is the path of the file opened in append mode
+to log all object copies create and delete errors.
+
+If this parameter is not specified, Phobos defaults to the
+**/var/lib/phobos/hsm_error** value.
+
+If the specified path does not exist, the phobos_hsm_sync_dir and
+phobos_hsm_release_dir commands will create it.
+
+Example:
+
+.. code:: ini
+
+    [hsm "source_copy_name" "destination_copy_name"]
+    error_log_path = "/var/lib/phobos/hsm_error"
+

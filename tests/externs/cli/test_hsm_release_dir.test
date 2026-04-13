@@ -27,8 +27,6 @@ test_dir=$(dirname $(readlink -e $0))
 . $test_dir/test_launch_daemon.sh
 . $test_dir/utils_generation.sh
 
-set -xe
-
 function setup
 {
     setup_tables
@@ -38,6 +36,8 @@ function setup
 
     export PHOBOS_LRS_families="dir"
     export PHOBOS_STORE_default_family="dir"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_error_log_path="${DIR_TEST}/hsm_error"
+    rm -f ${PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_error_log_path}
 
     invoke_lrs
 
@@ -69,8 +69,7 @@ function cleanup
 
 function check_hsm_release_dir_opt()
 {
-    ($valg_phobos_hsm_release_dir --bad_opt &&
-         error "--bad_opt parsing must fail") || true
+    $valg_phobos_hsm_release_dir --bad_opt && error "--bad_opt parsing must fail"
 
     local usage=$($valg_phobos_hsm_release_dir -h)
     local usage_long=$($valg_phobos_hsm_release_dir --help)
@@ -137,23 +136,28 @@ function check_copy()
 function check_hsm_release_dir()
 {
     # object to release
-    $phobos put --tags to_release --copy-name copy_to_release ${FILES[0]} to_release
+    $phobos put --metadata k1=v1,other=other --tags to_release \
+        --copy-name copy_to_release ${FILES[0]} to_release
     $phobos copy create --tags for_sync to_release copy_synced
 
     # deprecated object to release
-    $phobos put --tags to_release --copy-name copy_to_release ${FILES[0]} deprec_to_release
+    $phobos put --metadata k2=v2 --tags to_release --copy-name copy_to_release \
+        ${FILES[0]} deprec_to_release
     $phobos copy create --tags for_sync deprec_to_release copy_synced
     $phobos delete deprec_to_release
 
     # last candidate object to release
-    $phobos put --tags to_release --copy-name copy_to_release ${FILES[0]} last_to_release
+    $phobos put --tags to_release --copy-name copy_to_release \
+        ${FILES[0]} last_to_release
     $phobos copy create --tags for_sync last_to_release copy_synced
 
     # object not synced
-    $phobos put --tags to_release --copy-name copy_to_release ${FILES[0]} not_synced
+    $phobos put --tags to_release --copy-name copy_to_release \
+        ${FILES[0]} not_synced
 
     # object on a dir of an other host
-    $phobos put --tags other_host --copy-name copy_to_release ${FILES[0]} other_host
+    $phobos put --tags other_host --copy-name copy_to_release \
+        ${FILES[0]} other_host
     $phobos copy create --tags for_sync other_host copy_synced
     $PSQL << EOF
 UPDATE device SET host = 'other_host' WHERE path = '${dir_other_host}';
@@ -168,24 +172,40 @@ EOF
     sleep 2
 
     # object too young to be released
-    $phobos put --tags to_release --copy-name copy_to_release ${FILES[0]} too_young
+    $phobos put --tags to_release --copy-name copy_to_release \
+        ${FILES[0]} too_young
     $phobos copy create --tags for_sync too_young copy_synced
 
     # We have 6 extents of 100M each on the dir_to_release_1G : current fill
     # rate is 60% .
 
     # dry-run phobos_hsm_release_dir with a too high threshold
-    export PHOBOS_HSM_dir_release_higher_threshold="99"
-    dry_run_log=$($valg_phobos_hsm_release_dir -d copy_to_release copy_synced 2>&1)
-    (echo ${dry_run_log} | grep "Deleting") &&
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_higher_threshold="99"
+    dry_run_log=$($valg_phobos_hsm_release_dir copy_to_release copy_synced)
+    (echo "${dry_run_log}" | grep "DELETE") &&
         error "Too high threshold dry-run must not show any release"
 
     # dry-run phobos_hsm_release_dir
-    export PHOBOS_HSM_dir_release_higher_threshold="1"
-    export PHOBOS_HSM_dir_release_lower_threshold="0"
-    dry_run_log=$($valg_phobos_hsm_release_dir -d copy_to_release copy_synced 2>&1)
-    (echo ${dry_run_log} | grep "Deleting" | grep "DRY") ||
-        error "dry-run must show a release"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_higher_threshold="1"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_lower_threshold="0"
+    dry_run_log=$($valg_phobos_hsm_release_dir -m k1,k2 \
+                      copy_to_release copy_synced)
+    (echo "${dry_run_log}" | grep "DELETE" | grep "to_release" | \
+     grep "copy_to_release" | grep " \"k1\"=\"v1\"") ||
+        error "dry-run must show a release of to_release"
+    (echo "${dry_run_log}" | grep "DELETE" | grep "deprec_to_release" | \
+     grep "copy_to_release" | grep " \"k2\"=\"v2\"") ||
+        error "dry-run must show a release of deprec_to_release"
+
+    # base64 dry-run phobos_hsm_release_dir
+    dry_run_log=$($valg_phobos_hsm_release_dir -b -m k1,k2 \
+                      copy_to_release copy_synced)
+    (echo "${dry_run_log}" | grep "DELETE" | grep "to_release" | \
+     grep "copy_to_release" | grep " \"k1\"=\"$(echo -n v1 | base64)\"") ||
+        error "dry-run must show a release of to_release"
+    (echo "${dry_run_log}" | grep "DELETE" | grep "deprec_to_release" | \
+     grep "copy_to_release" | grep " \"k2\"=\"$(echo -n v2 | base64)\"") ||
+        error "dry-run must show a release of deprec_to_release"
 
     # run phobos_hsm_release_dir
 
@@ -199,10 +219,10 @@ EOF
 
     current=$(date +%s)
     ((release_delay_second = current - date_to_release))
-    export PHOBOS_HSM_release_delay_second="${release_delay_second}"
-    export PHOBOS_HSM_dir_release_higher_threshold="55"
-    export PHOBOS_HSM_dir_release_lower_threshold="45"
-    run_log=$($valg_phobos_hsm_release_dir copy_to_release copy_synced 2>&1)
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_release_delay_second="${release_delay_second}"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_higher_threshold="55"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_lower_threshold="45"
+    run_log=$($valg_phobos_hsm_release_dir -d copy_to_release copy_synced 2>&1)
 
     # released
     check_copy to_release copy_synced
@@ -215,7 +235,33 @@ EOF
     check_copy too_young copy_to_release copy_synced
 }
 
+function log_on_error()
+{
+    # object to release
+    $phobos put --tags to_release --copy-name copy_to_release ${FILES[0]} to_release
+
+    # get extent to release
+    local extent_addr=$($phobos extent list -o address to_release | tr -d \ \'[])
+    local extent_dir=$($phobos extent list -o media_name to_release | tr -d \ \'[])
+
+    # sync the object
+    $phobos copy create --tags for_sync to_release copy_synced
+
+    # remove extent to release
+    rm -f ${extent_dir}/${extent_addr}
+
+    # run release and check that the log error file is created
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_release_delay_second="0"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_higher_threshold="1"
+    export PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_dir_release_lower_threshold="0"
+    $valg_phobos_hsm_release_dir -d source sync || true
+    if [! -f "${PHOBOS_HSM_COPY_TO_RELEASE_COPY_SYNCED_error_log_path}" ]; then
+        error "error log file must be created on error"
+    fi
+}
+
 TESTS=(
     "check_hsm_release_dir_opt;"
     "setup; check_hsm_release_dir; cleanup"
+    "setup; log_on_error; cleanup"
 )

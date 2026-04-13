@@ -592,14 +592,7 @@ out_update:
     copy.object_uuid = obj_res->uuid;
     copy.version = obj_res->version;
     copy.copy_status = PHO_COPY_STATUS_INCOMPLETE;
-
-    if (copy_name) {
-        copy.copy_name = copy_name;
-    } else {
-        rc = get_cfg_default_copy_name(&copy.copy_name);
-        if (rc)
-            LOG_GOTO(out_res, rc, "Cannot get default copy_name from conf");
-    }
+    copy.copy_name = copy_name;
 
     rc = dss_copy_insert(dss, &copy, 1);
     if (rc)
@@ -1348,17 +1341,7 @@ cont:
 
             copy.object_uuid = xfer->xd_targets[i].xt_objuuid;
             copy.version = xfer->xd_targets[i].xt_version;
-            if (xfer->xd_params.copy.put.copy_name) {
-                copy.copy_name = xfer->xd_params.copy.put.copy_name;
-            } else {
-                rc2 = get_cfg_default_copy_name(&copy.copy_name);
-                if (rc2) {
-                    pho_error(rc2,
-                              "Cannot get default copy_name from conf");
-                    rc = rc ? : rc2;
-                    continue;
-                }
-            }
+            copy.copy_name = xfer->xd_params.copy.put.copy_name;
 
             rc2 = dss_copy_delete(&pho->dss, &copy, 1);
             if (rc2) {
@@ -1687,17 +1670,7 @@ static int store_perform_xfers(struct phobos_handle *pho)
                 copy.object_uuid = xfer->xd_targets[j].xt_objuuid;
                 copy.version = xfer->xd_targets[j].xt_version;
                 copy.copy_status = PHO_COPY_STATUS_INCOMPLETE;
-                if (xfer->xd_params.copy.put.copy_name) {
-                    copy.copy_name = xfer->xd_params.copy.put.copy_name;
-                } else {
-                    rc2 = get_cfg_default_copy_name(&copy.copy_name);
-                    if (rc2) {
-                        pho_error(rc2,
-                                  "Cannot get default copy_name from conf");
-                        rc = rc ? : rc2;
-                        break;
-                    }
-                }
+                copy.copy_name = xfer->xd_params.copy.put.copy_name;
 
                 rc2 = dss_copy_insert(&pho->dss, &copy, 1);
                 if (rc2) {
@@ -2192,32 +2165,4 @@ int phobos_copy(struct pho_xfer_desc *xfers, size_t n,
     }
 
     return phobos_xfer(xfers, n, cb, udata);
-}
-
-int phobos_copy_delete(struct pho_xfer_desc *xfers, size_t num_xfers)
-{
-    size_t i;
-    size_t j;
-
-    for (i = 0; i < num_xfers; i++) {
-        xfers[i].xd_op = PHO_XFER_OP_DEL;
-        xfers[i].xd_rc = 0;
-        for (j = 0; j < xfers[i].xd_ntargets; j++)
-            xfers[i].xd_targets[j].xt_rc = 0;
-        /* If the uuid is given by the user, we don't own that memory.
-         * The simplest solution is to duplicate it here so that it can
-         * be freed at the end by pho_xfer_desc_clean().
-         *
-         * The user of this function must free any allocated string passed to
-         * the xfer.
-         *
-         * For the Python CLI, the garbage collector will take care of
-         * this pointer.
-         */
-        if (xfers[i].xd_targets->xt_objuuid)
-            xfers[i].xd_targets->xt_objuuid =
-                xstrdup(xfers[i].xd_targets->xt_objuuid);
-    }
-
-    return phobos_xfer(xfers, num_xfers, NULL, NULL);
 }
