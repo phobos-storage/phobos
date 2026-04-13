@@ -117,9 +117,8 @@ static int layout_insert_query(PGconn *conn, void *void_layout, int item_cnt,
                 request,
                 "((select object_uuid from object where oid = '%s'),"
                 " (select version from object where oid = '%s'),"
-                " (select extent_uuid from extent where address = '%s'),"
-                " %d, '%s')",
-                layout->oid, layout->oid, extent->address.buff,
+                " '%s', %d, '%s')",
+                layout->oid, layout->oid, extent->uuid,
                 extent->layout_idx, layout->copy_name
             );
 
