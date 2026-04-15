@@ -16,13 +16,20 @@ function check_c_api()
     cat <<EOF > test_c_api.c
 #include <phobos_store.h>
 #include <phobos_admin.h>
+
+int main(void)
+{
+    // We call phobos_init to prevent the linker from optimizing away the link
+    phobos_init();
+    return 0;
+}
 EOF
 
     sudo dnf --cacheonly -y install phobos-[1-9]* phobos-devel*
-    # Just compile, do not link. We just check the coherency between the headers
-    # and the specfile
-    gcc -c -o test_c_api.o test_c_api.c `pkg-config --cflags glib-2.0`
-    rm test_c_api.*
+    # Compile and link to verify the pkg-config file and the devel package
+    # integrity
+    gcc -o test_c_api test_c_api.c `pkg-config --cflags --libs phobos`
+    rm -f test_c_api test_c_api.c
     sudo dnf --cacheonly -y remove phobos phobos-devel
     cd -
 }

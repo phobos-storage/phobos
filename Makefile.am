@@ -18,9 +18,12 @@ rpm: dist phobos.spec
 man:
 	$(MAKE) -C doc/man
 
-EXTRA_DIST= phobos.spec phobos.spec.in scripts/pho_ldm_helper \
+EXTRA_DIST= phobos.spec phobos.spec.in phobos.pc.in scripts/pho_ldm_helper \
 	    scripts/phobos_db README.md doc/cfg/template.conf $(dist_man_MANS) \
 	    doc/man/source
+
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = phobos.pc
 
 sbin_SCRIPTS=scripts/pho_ldm_helper \
              scripts/phobos_db

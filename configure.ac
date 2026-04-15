@@ -165,5 +165,6 @@ AC_CONFIG_FILES([Makefile
          doc/man/Makefile
          tape_library_certification/Makefile
          phobos.spec
+         phobos.pc
 ])
 AC_OUTPUT

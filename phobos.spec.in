@@ -196,6 +196,7 @@ mkdir -p %{buildroot}/%{_sharedstatedir}/phobos
 %{_includedir}/phobos_admin.h
 %{_libdir}/libphobos_store.la
 %{_libdir}/libphobos_admin.la
+%{_libdir}/pkgconfig/phobos.pc
 
 %post
 ldconfig
