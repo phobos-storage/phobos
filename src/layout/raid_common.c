@@ -453,39 +453,71 @@ static inline int64_t priority_from_ctime(struct timeval copy_ctime)
             (int64_t)copy_ctime.tv_usec);
 }
 
+/** Return the extent with the corresponding layout_idx or NULL */
+static struct extent *extent_from_layout_idx(struct extent *extents,
+                                             int ext_count, int layout_idx)
+{
+    int i;
+
+    for (i = 0; i < ext_count; i++)
+        if (extents[i].layout_idx == layout_idx)
+            return &extents[i];
+
+    return NULL;
+}
+
 /** Generate the next read or delete allocation request for this eraser */
 static void raid_reader_eraser_build_allocation_req(
     struct pho_data_processor *proc, pho_req_t *req, enum processor_type type)
 {
     struct raid_io_context *io_context =
         io_context_from_proc(proc, proc->current_target, type);
-    size_t n_extents = n_total_extents(io_context);
-    int i;
+    size_t n_extents_per_split = n_total_extents(io_context);
+    size_t current_split_n_extents = 0;
+    int read_alloc_med_idx = 0;
+    int layout_idx;
 
     ENTRY;
 
-    pho_srl_request_read_alloc(req, n_extents);
+    /* count existing extent for the current split */
+    for (layout_idx = io_context->current_split * n_extents_per_split;
+         layout_idx < (io_context->current_split + 1) * n_extents_per_split;
+         layout_idx++) {
+        if (extent_from_layout_idx(proc->src_layout->extents,
+                                   proc->src_layout->ext_count, layout_idx))
+            current_split_n_extents++;
+    }
+
+    if (is_decoder(proc) || is_copier(proc))
+        assert(current_split_n_extents >= io_context->n_data_extents);
+
+    pho_srl_request_read_alloc(req, current_split_n_extents);
     req->has_qos = true;
     req->qos = 0;
     req->has_priority = true;
     req->priority = priority_from_ctime(proc->src_copy_ctime);
     req->ralloc->n_required =
-        is_eraser(proc) ? n_extents : io_context->n_data_extents;
+        is_eraser(proc) ? current_split_n_extents : io_context->n_data_extents;
     req->ralloc->operation =
         is_eraser(proc) ? PHO_READ_TARGET_ALLOC_OP_DELETE :
                           PHO_READ_TARGET_ALLOC_OP_READ;
 
-    for (i = 0; i < n_extents; ++i) {
-        unsigned int ext_idx;
+    for (layout_idx = io_context->current_split * n_extents_per_split;
+         layout_idx < (io_context->current_split + 1) * n_extents_per_split;
+         layout_idx++) {
+        struct extent *extent =
+            extent_from_layout_idx(proc->src_layout->extents,
+                                   proc->src_layout->ext_count, layout_idx);
 
-        ext_idx = io_context->current_split * n_extents + i;
+        if (!extent)
+            continue;
 
-        req->ralloc->med_ids[i]->family =
-            proc->src_layout->extents[ext_idx].media.family;
-        req->ralloc->med_ids[i]->name =
-            xstrdup(proc->src_layout->extents[ext_idx].media.name);
-        req->ralloc->med_ids[i]->library =
-            xstrdup(proc->src_layout->extents[ext_idx].media.library);
+        req->ralloc->med_ids[read_alloc_med_idx]->family = extent->media.family;
+        req->ralloc->med_ids[read_alloc_med_idx]->name =
+            xstrdup(extent->media.name);
+        req->ralloc->med_ids[read_alloc_med_idx]->library =
+            xstrdup(extent->media.library);
+        read_alloc_med_idx++;
     }
 }
 
@@ -803,7 +835,6 @@ static int raid_reader_split_setup(struct pho_data_processor *proc,
 {
     struct raid_io_context *io_context = proc->private_reader;
     pho_resp_read_elt_t **medium = resp->ralloc->media;
-    size_t n_extents = n_total_extents(io_context);
     size_t n_media = resp->ralloc->n_media;
     size_t i;
     int rc;
@@ -813,7 +844,7 @@ static int raid_reader_split_setup(struct pho_data_processor *proc,
     if (n_media != io_context->n_data_extents)
         LOG_RETURN(-EINVAL, "Invalid number of media return by phobosd. "
                             "Expected %lu, got %lu",
-                   n_extents, n_media);
+                   io_context->n_data_extents, n_media);
 
     io_context->read.resp = copy_response_read_alloc(resp);
 

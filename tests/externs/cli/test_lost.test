@@ -54,6 +54,8 @@ function setup_dir
     invoke_lrs
 
     setup_test_dirs
+    # one file bigger than 1M
+    setup_dummy_files 1 1k 1025
 
     export TEST_FAMILY="dir"
 }
@@ -72,6 +74,7 @@ function setup_tape
 function cleanup_dir
 {
     waive_lrs
+    cleanup_dummy_files
     cleanup_test_dirs
     drop_tables
 }
@@ -248,6 +251,73 @@ function test_layout_raid1
     return 0
 }
 
+function test_layout_raid1_dir_split
+{
+    local prefix=$(generate_prefix_id)
+    local oid=${prefix}_id
+    local obj_media
+    local media
+
+    media=(
+        $(make_tmp_fs 1M)
+        $(make_tmp_fs 1M)
+        $(make_tmp_fs 1M)
+        $(make_tmp_fs 1M)
+    )
+
+    $phobos dir add ${media[@]}
+    $phobos dir format --unlock ${media[@]}
+
+    $phobos put -f dir --layout raid1 --lyt-params "repl_count=2" \
+        ${FILES[0]} $oid || error "Object $oid should be put"
+
+    stop_daemons
+
+    obj_media=($($phobos extent list -f json -o media_name "$oid" | \
+                 jq -r ".[0].media_name[]"))
+
+    # We delete the first extent of the second split.
+    # For the four extents idx, 0, 1, 2, 3, we delete the layout_idx 2.
+    $valg_phobos dir delete --lost ${obj_media[2]} ||
+        error "Deletion of ${obj_media[2]} should have succeeded"
+
+    check_remaining 3 0 1 0 3
+
+    start_daemons
+
+    check_get_success $oid ${FILES[0]}
+
+    stop_daemons
+
+    # We delete the second extent of the first split.
+    # For the four extents idx, 0, 1, 2, 3, we delete the layout_idx 1.
+    $valg_phobos dir delete --lost ${obj_media[1]} ||
+        error "Deletion of ${obj_media[1]} should have succeeded"
+
+    check_remaining 2 0 1 0 2
+
+    start_daemons
+
+    check_get_success $oid ${FILES[0]}
+
+    stop_daemons
+
+    # We delete the second extent of the second split.
+    # For the four extents idx, 0, 1, 2, 3, we delete the layout_idx 3.
+    $valg_phobos dir delete --lost ${obj_media[3]} ||
+        error "Deletion of ${obj_media[3]} should have succeeded"
+
+    check_remaining 1 0 0 1 1
+
+    start_daemons
+
+    check_get_failure $oid
+
+    stop_daemons
+
+    return 0
+}
+
 function test_layout_raid4
 {
     local file="$1"
@@ -415,6 +485,7 @@ TESTS=(
     "setup_dir; test_layout_raid4_even; cleanup_dir"
     "setup_dir; test_layout_raid4_odd; cleanup_dir"
     "setup_dir; test_with_import; cleanup_dir"
+    "setup_dir; test_layout_raid1_dir_split; cleanup_dir"
 )
 
 if  [[ -w /dev/changer ]]; then
