@@ -51,7 +51,8 @@ function format_ltfs
     local label=$2
     local serial=${label:0:6}
 
-    mkltfs -f -d "$drive" -n "$label" -s "$serial" || exit 1
+    set -e
+    mkltfs -f -d "$drive" -n "$label" -s "$serial"
 }
 
 function release_ltfs

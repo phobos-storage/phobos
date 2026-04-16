@@ -117,12 +117,19 @@ AM_CONDITIONAL([USE_XXHASH],
 # Checks for header files.
 AC_HEADER_STDC
 AC_CHECK_HEADERS([string.h sys/param.h limits.h])
-AC_CHECK_HEADERS([jansson.h], [], [AC_MSG_ERROR(missing jansson header files)])
-AC_CHECK_HEADERS([ini_config.h], [], [AC_MSG_ERROR(missing libini_config header files)])
-AC_CHECK_HEADERS([openssl/sha.h], [], [AC_MSG_ERROR(missing openssl libcrypt header files)])
-AC_CHECK_HEADERS([attr/xattr.h], [], [AC_MSG_ERROR(missing libattr header files)])
-AC_CHECK_HEADERS([scsi/sg_io_linux.h], [], [AC_MSG_ERROR(missing sg3_utils header files)])
-AC_CHECK_HEADERS([protobuf-c/protobuf-c.h], [], [AC_MSG_ERROR(missing protobuf-c header files)])
+AC_CHECK_HEADERS([jansson.h], [],
+                 [AC_MSG_ERROR(missing jansson header files)])
+AC_CHECK_HEADERS([ini_config.h], [],
+                 [AC_MSG_ERROR(missing libini_config header files)])
+AC_CHECK_HEADERS([openssl/sha.h], [],
+                 [AC_MSG_ERROR(missing openssl libcrypt header files)])
+AC_CHECK_HEADERS([attr/xattr.h], [],
+                 [AC_MSG_ERROR(missing libattr header files)])
+AC_CHECK_HEADERS([scsi/sg_io_linux.h], [],
+                 [AC_MSG_ERROR(missing sg3_utils header files)])
+AC_CHECK_HEADERS([protobuf-c/protobuf-c.h], [],
+                 [AC_MSG_ERROR(missing protobuf-c header files)])
+
 PKG_CHECK_MODULES(JANSSON, [jansson >= 2.5])
 PKG_CHECK_MODULES(LIBPQ, [libpq >= 9.4])
 PKG_CHECK_MODULES(CMOCKA, [cmocka >= 1.1], ,
