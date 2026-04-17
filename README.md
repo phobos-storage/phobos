@@ -87,6 +87,17 @@ Then, you must initialize the postgresql directories:
 postgresql-setup --initdb --unit postgresql
 ```
 
+Edit `/var/lib/pgsql/9.4/data/pg_hba.conf` to authorize access from phobos host
+(localhost in this example, change it if your network is a different one):
+```
+# "local" is for Unix domain socket connections only
+local   all             all                                     trust
+# IPv4 local connections:
+host    all             all             127.0.0.1/32            md5
+# IPv6 local connections:
+host    all             all             ::1/128                 md5
+```
+
 Move the created configuration file to the PostgreSQL directory in `/var/lib`:
 ```
 mv /tmp/pg_hba.conf /var/lib/pgsql/data/
