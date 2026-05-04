@@ -1,5 +1,8 @@
 # CHANGELOG UPDATES
 
+## Next
+ * WARNING: the stat dev.umount_error is changed to dev.umount_errors .
+
 ## 3.3.1
  * WARNING: the `--orphan` from `phobos extent list` changed to `--state`. It
    allows the filtering of the extents with their states.

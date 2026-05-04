@@ -134,7 +134,7 @@ int dev_stats_init(struct lrs_dev *dev)
     dev->stats.mount_errors = pho_stat_create(PHO_STAT_COUNTER, DEV_STATS_NS,
                                               "mount_errors", tags);
     dev->stats.umount_errors = pho_stat_create(PHO_STAT_COUNTER, DEV_STATS_NS,
-                                               "umount_error", tags);
+                                               "umount_errors", tags);
     dev->stats.load_errors = pho_stat_create(PHO_STAT_COUNTER, DEV_STATS_NS,
                                              "load_errors", tags);
     dev->stats.unload_errors = pho_stat_create(PHO_STAT_COUNTER, DEV_STATS_NS,

@@ -13,7 +13,7 @@ The document describes the metrics reported by 'phobos stats'.
  | family, device | dev.requested_sync       | counter | Number of requested device synchronizations.                  |
  | family, device | dev.effective_sync       | counter | Number of effective device synchronizations.                  |
  | family, device | dev.mount_errors         | counter | Number of device mount errors.                                |
- | family, device | dev.umount_error         | counter | Number of device unmount errors.                              |
+ | family, device | dev.umount_errors        | counter | Number of device unmount errors.                              |
  | family, device | dev.load_errors          | counter | Number of device load errors.                                 |
  | family, device | dev.unload_errors        | counter | Number of device unload errors.                               |
  | family, device | dev.format_errors        | counter | Number of device format errors.                               |
