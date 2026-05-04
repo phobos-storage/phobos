@@ -957,9 +957,10 @@ int dss_get_living_and_deprecated_objects(struct dss_handle *handle,
 
     g_string_append_printf(request,
         "SELECT oid, object_uuid, version, user_md, creation_time, _grouping, size,"
-        "deprec_time FROM deprecated_object UNION "
+        "deprec_time FROM deprecated_object %s UNION "
         "SELECT oid, object_uuid, version, user_md, creation_time, _grouping, size,"
         "Null FROM object %s",
+        clause->str != NULL ? clause->str : "",
         clause->str != NULL ? clause->str : "");
 
     dss_sort2sql(request, sort);
