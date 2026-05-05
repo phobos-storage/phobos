@@ -1008,11 +1008,13 @@ int raid_reader_processor_step(struct pho_data_processor *proc,
         *reqs = xcalloc(1, sizeof(**reqs));
         *n_reqs = 1;
         raid_reader_eraser_build_allocation_req(proc, *reqs, PHO_PROC_DECODER);
+        proc->need_alloc_response_to_read = true;
         return 0;
     }
 
     /* manage received allocation */
     if (resp) {
+        proc->need_alloc_response_to_read = false;
         rc = raid_reader_split_setup(proc, resp);
         if (rc)
             goto release;
@@ -1070,6 +1072,7 @@ release:
         raid_reader_eraser_build_allocation_req(proc, *reqs + *n_reqs,
                                                 PHO_PROC_DECODER);
         (*n_reqs)++;
+        proc->need_alloc_response_to_read = true;
    }
 
    return rc;
@@ -1461,6 +1464,7 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
         *n_reqs = 1;
         raid_writer_build_allocation_req(proc, *reqs,
                                          all_target_remain_to_write_per_medium);
+        proc->need_alloc_response_to_write = true;
         goto set_target_rc;
     }
 
@@ -1499,6 +1503,7 @@ int raid_writer_processor_step(struct pho_data_processor *proc,
                     NULL)
                 rc = context->mocks.mock_failure_after_second_partial_release();
         } else {
+            proc->need_alloc_response_to_write = false;
             rc = raid_writer_split_setup(proc, resp);
         }
 
@@ -1582,6 +1587,7 @@ check_for_release:
         raid_writer_build_allocation_req(proc, *reqs + *n_reqs,
                                          all_target_remain_to_write_per_medium);
         (*n_reqs)++;
+        proc->need_alloc_response_to_write = true;
     }
 
 set_target_rc:

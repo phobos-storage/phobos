@@ -160,8 +160,10 @@ struct pho_data_processor {
     struct pho_buff buff; /* buffer to transfer between reader and writer */
     size_t buffer_offset; /* offset in the object of the first byte in buff */
     void *private_reader; /* one reader per target (posix ones for encoder) */
+    bool need_alloc_response_to_read; /* reader is waiting an alloc to read */
     const struct pho_proc_ops *reader_ops;
     void *private_writer; /* one writer per target (posix ones for decoder) */
+    bool need_alloc_response_to_write; /* writer is waiting an alloc to write */
     const struct pho_proc_ops *writer_ops;
     /*
      * As soon as it receives a resp alloc, the writer prepares its
