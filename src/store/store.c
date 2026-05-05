@@ -398,7 +398,8 @@ static int processor_communicate(struct pho_data_processor *proc,
 
     /* process buffer data until we face an error */
     /* no more io needed after a completed write step */
-    while (!rc && !writer_done) {
+    while (!rc && !writer_done &&
+           !(reader_done && proc->reader_offset == proc->writer_offset)) {
         /* try read first */
         if ((!reader_done && proc->reader_offset == proc->writer_offset &&
             proc->object_size != 0) ||
