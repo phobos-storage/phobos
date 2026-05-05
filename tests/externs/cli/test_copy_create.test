@@ -26,6 +26,7 @@ test_dir=$(dirname $(readlink -e $0))
 . $test_dir/setup_db.sh
 . $test_dir/test_launch_daemon.sh
 . $test_dir/tape_drive.sh
+. $test_dir/utils_generation.sh
 
 ################################################################################
 #                                    SETUP                                     #
@@ -109,6 +110,42 @@ function cleanup
     drop_tables
 
     rm -rf ${DIRS[@]}
+}
+
+function setup_raid1_no_split_to_split
+{
+    setup_tables
+    invoke_lrs
+
+    setup_test_dirs
+    # one file bigger than 1M
+    setup_dummy_files 1 1k 1025
+
+    # one "huge" source dir to avoid source split
+    source_dir="$DIR_TEST_IN/source_dir"
+    mkdir ${source_dir}
+    $phobos dir add --tags obj ${source_dir}
+    $phobos dir format --unlock ${source_dir}
+
+    # 2 dirs for copy splitting
+    copy_dirs=(
+        $(make_tmp_fs 1M)
+        $(make_tmp_fs 1M)
+    )
+    $phobos dir add --tags copy ${copy_dirs[@]}
+    $phobos dir format --unlock ${copy_dirs[@]}
+}
+
+function cleanup_raid1_no_split_to_split
+{
+    waive_lrs
+    for dir in ${copy_dirs[@]}; do
+        cleanup_tmp_fs ${dir}
+    done
+
+    cleanup_dummy_files
+    cleanup_test_dirs
+    drop_tables
 }
 
 ################################################################################
@@ -323,7 +360,25 @@ function test_copy_user_copy_name()
     check_extents "disk" 1 "disk-copy" 1 "copy_name"
 }
 
-TESTS=("setup_raid1; test_copy_raid1_to_raid1; cleanup"
+function test_copy_raid1_no_split_to_split()
+{
+    $phobos put -f dir --tags obj -l raid1 --lyt-params=repl_count=1 \
+        ${FILES[0]} oid
+
+    $valg_phobos copy create -f dir --tags copy -l raid1 \
+        --lyt-params=repl_count=1 oid copy ||
+        error "Phobos copy create from raid1 no split to split should have" \
+              "worked"
+
+    check_copies "source" "copy" 2
+
+    check_extents "source" 1 "copy" 2 "copy_name"
+}
+
+TESTS=("setup_raid1_no_split_to_split; \
+        test_copy_raid1_no_split_to_split; \
+        cleanup_raid1_no_split_to_split"
+       "setup_raid1; test_copy_raid1_to_raid1; cleanup"
        "setup_raid1_repl; test_copy_raid1_repl; cleanup"
        "setup_raid1_repl; test_copy_raid1_to_raid1_repl; cleanup"
        "setup_raid1_repl; test_copy_raid1_repl_to_raid1; cleanup"

@@ -1055,10 +1055,13 @@ static int init_enc_or_dec(struct pho_data_processor *proc,
      */
     proc->object_size = obj->size;
 
-    /* use existing grouping as default for copy */
-    /* put grouping attribute must not be preset for a copy operation */
-    if (proc->type == PHO_PROC_COPIER)
+    if (proc->type == PHO_PROC_COPIER) {
+        /* input user do not preset the target size when creating a copy */
+        xfer->xd_targets->xt_size = obj->size;
+        /* use existing grouping as default for copy */
+        /* put grouping attribute must not be preset for a copy operation */
         xfer->xd_params.copy.put.grouping = xstrdup_safe(obj->grouping);
+    }
 
     rc = get_copy(dss, xfer, obj, &copy);
     if (rc)
