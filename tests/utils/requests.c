@@ -86,7 +86,7 @@ void recv_responses(struct pho_comm_info *comm,
     *resps = xmalloc(*n_resps * sizeof(*resps));
 
     for (i = 0; i < *n_resps; i++)
-        (*resps)[i] = pho_srl_response_unpack(&responses[0].buf);
+        (*resps)[i] = pho_srl_response_unpack(&responses[i].buf);
 
     free(responses);
 }
@@ -118,7 +118,7 @@ pho_req_t *make_write_request(int id, int n_media, int size,
                               struct string_array *tags,
                               const char *library)
 {
-    size_t *n_tags = xmalloc(tags->count * sizeof(*n_tags));
+    size_t *n_tags = xmalloc(n_media * sizeof(*n_tags));
     pho_req_t *req = xmalloc(sizeof(*req));
     int i;
 

@@ -328,7 +328,8 @@ static struct gw_grouping *get_grouping(struct gw_queue *queue,
 
 new_grouping:
     grouping = gw_grouping_new(name);
-    g_queue_push_head(queue->groupings, grouping);
+    /* push at the end of the queue to preserve the order of arrival */
+    g_queue_push_tail(queue->groupings, grouping);
     if (name)
         g_hash_table_insert(queue->grouping_index, grouping->name, grouping);
     else
@@ -637,9 +638,9 @@ static struct string_array request_get_tags(struct gw_request *request)
 static bool medium_is_ready(struct gw_state *state, struct gw_queue *queue,
                             size_t index)
 {
-    struct gw_request *first;
     struct media_info *medium;
     struct string_array tags;
+    struct gw_request *first;
     bool compatible;
 
     assert(queue->devices[index]);
@@ -706,6 +707,7 @@ static int gw_get_device_medium_pair(struct io_scheduler *io_sched,
         return rc;
 
     *dev = queue->devices[*index];
+    g_hash_table_insert(state->device_to_queue, *dev, queue);
     if (*dev)
         g_ptr_array_add(state->busy_devices, *dev);
 
@@ -831,7 +833,7 @@ static struct lrs_dev *gw_find_device_to_remove(struct io_scheduler *io_sched,
     size_t i;
 
     for (i = 0; i < state->free_devices->len; i++) {
-        struct lrs_dev *device = g_ptr_array_index(state->free_devices, 0);
+        struct lrs_dev *device = g_ptr_array_index(state->free_devices, i);
 
         if (strcmp(techno, device->ld_technology))
             continue;

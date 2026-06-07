@@ -290,8 +290,8 @@ static int get_library_and_family(struct dss_handle *dss,
     *library = NULL;
 
     for (i = 0; i < n_media; i++) {
-        struct media_info *res;
         struct dss_filter filter;
+        struct media_info *res;
         int n_res;
 
         rc = dss_filter_build(&filter, "{\"DSS::MDA::id\": \"%s\"}", media[i]);
@@ -363,7 +363,7 @@ static int pc_read(struct client_context *ctxt,
         return rc;
 
     read = make_read_request(ctxt->last_id++, n_media, n_required,
-                             PHO_RSC_DIR, (const char **)media,
+                             family, (const char **)media,
                              library);
     tsqueue_push(&ctxt->requests, read);
     signal_send(&ctxt->new_request);
@@ -392,11 +392,10 @@ static int pc_write(struct client_context *ctxt,
                      int argc, char **argv)
 {
     struct option options[] = {
-        {"grouping",    no_argument,       0,  'g'},
-        {"family",      no_argument,       0,  'f'},
-        {"library",     no_argument,       0,  'l'},
-        {"grouping",    no_argument,       0,  'g'},
-        {"tags",        no_argument,       0,  't'},
+        {"grouping",    required_argument, 0,  'g'},
+        {"family",      required_argument, 0,  'f'},
+        {"library",     required_argument, 0,  'l'},
+        {"tags",        required_argument, 0,  't'},
         {0,             0,                 0,  0}
     };
     enum rsc_family family = PHO_RSC_DIR;
@@ -409,7 +408,7 @@ static int pc_write(struct client_context *ctxt,
     char c;
     int rc;
 
-    while ((c = getopt_long(argc, argv, "t:g:", options, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "g:f:l:t:", options, NULL)) != -1) {
         switch (c) {
         default:
             printf("Invalid arguments\n");
@@ -419,11 +418,11 @@ static int pc_write(struct client_context *ctxt,
             if (family == PHO_RSC_INVAL)
                 LOG_RETURN(-EINVAL, "invalid family '%s'", optarg);
             break;
-        case 'l':
-            library = xstrdup(optarg);
-            break;
         case 'g':
             grouping = xstrdup(optarg);
+            break;
+        case 'l':
+            library = xstrdup(optarg);
             break;
         case 't':
             tags = parse_tags(optarg);
@@ -576,8 +575,10 @@ static int release_n(struct client_context *ctxt, size_t n, bool async)
         req = make_release_request(resp, walloc, ctxt->last_id++, async);
         tsqueue_push(&ctxt->requests, req);
         g_hash_table_iter_remove(&iter);
-        if (walloc)
+        if (walloc) {
             pho_srl_request_free(walloc, false);
+            g_hash_table_remove(ctxt->write_reqs_by_id, &resp->req_id);
+        }
         pho_srl_response_free(resp, true);
         n--;
     }
@@ -965,15 +966,11 @@ static int interpret_file(struct client_context *ctxt)
     return PCCR_SUCCESS;
 }
 
-static void handle_sigterm(int signum)
-{
-}
-
 static void setup_signal(void)
 {
     struct sigaction sig;
 
-    sig.sa_handler = handle_sigterm;
+    sig.sa_handler = SIG_IGN;
     sig.sa_flags = 0;
     sigemptyset(&sig.sa_mask);
     sigaction(SIGTERM, &sig, NULL);
@@ -1059,7 +1056,8 @@ static void *comm_thread(void *data)
 
             if (!pho_request_is_write(req))
                 /* We keep writes in the write_reqs_by_id hashtable to build
-                 * the release request. They are freed after the release is built.
+                 * the release request. They are freed after the release is
+                 * built.
                  */
                 pho_srl_request_free(req, false);
         }

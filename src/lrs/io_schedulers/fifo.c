@@ -183,6 +183,9 @@ static bool ongoing_grouping_equal(const struct lrs_dev *dev,
     if (!grouping)
         return dev->ld_ongoing_grouping == NULL;
 
+    if (dev->ld_ongoing_grouping == NULL)
+        return false;
+
     return !strcmp(dev->ld_ongoing_grouping, grouping);
 }
 

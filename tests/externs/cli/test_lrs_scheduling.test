@@ -26,8 +26,6 @@ test_dir=$(dirname $(readlink -e $0))
 . $test_dir/utils.sh
 . $test_dir/utils_generation.sh
 
-phobosd_client="$test_dir/utils/.libs/phobosd-client"
-
 function setup()
 {
     export PHOBOS_LRS_lock_file="$test_dir/phobosd.lock"
@@ -161,7 +159,7 @@ function cleanup_phobosd_client()
 {
     waive_lrs
     drop_tables
-    rm -rf "$DIR_TEST"
+    cleanup_test_dirs
 }
 
 function test_phobosd_client()
