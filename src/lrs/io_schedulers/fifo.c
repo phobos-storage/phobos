@@ -164,9 +164,34 @@ static int max_write_per_grouping(void)
     return concurrent_write_per_grouping;
 }
 
-static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
-                                                        const char *grouping,
-                                                        int max_grouping)
+static bool req_grouping_equal(struct req_container *reqc,
+                               const char *grouping)
+{
+    if (!pho_request_is_write(reqc->req))
+        return false;
+
+    if (!grouping)
+        return reqc->req->walloc->grouping == NULL;
+
+    return reqc->req->walloc->grouping &&
+        !strcmp(reqc->req->walloc->grouping, grouping);
+}
+
+static bool ongoing_grouping_equal(const struct lrs_dev *dev,
+                                   const char *grouping)
+{
+    if (!grouping)
+        return dev->ld_ongoing_grouping == NULL;
+
+    if (dev->ld_ongoing_grouping == NULL)
+        return false;
+
+    return !strcmp(dev->ld_ongoing_grouping, grouping);
+}
+
+bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
+                                                 const char *grouping,
+                                                 int max_grouping)
 {
     GPtrArray *socket_id_array = g_ptr_array_new_full(max_grouping - 1, NULL);
 
@@ -179,15 +204,12 @@ static bool current_write_per_grouping_greater_than_max(GPtrArray *devices,
         dev = g_ptr_array_index(devices, i);
         MUTEX_LOCK(&dev->ld_mutex);
         if ((dev->ld_sub_request &&
-             pho_request_is_write(dev->ld_sub_request->reqc->req) &&
-             dev->ld_sub_request->reqc->req->walloc->grouping &&
-             !strcmp(dev->ld_sub_request->reqc->req->walloc->grouping,
-                     grouping) &&
+             req_grouping_equal(dev->ld_sub_request->reqc, grouping) &&
              !g_ptr_array_find(socket_id_array,
                  (gconstpointer)(intptr_t) dev->ld_sub_request->reqc->socket_id,
                  NULL)) ||
-            (dev->ld_ongoing_io && dev->ld_ongoing_grouping &&
-             !strcmp(dev->ld_ongoing_grouping, grouping) &&
+            (dev->ld_ongoing_io &&
+             ongoing_grouping_equal(dev, grouping) &&
              !g_ptr_array_find(socket_id_array,
                  (gconstpointer)(intptr_t) dev->ld_ongoing_socket_id,
                  NULL))) {
@@ -346,11 +368,11 @@ static int find_read_device(struct io_scheduler *io_sched,
     return 0;
 }
 
-static int find_write_device(struct io_scheduler *io_sched,
-                             struct req_container *reqc,
-                             struct lrs_dev **dev,
-                             size_t index,
-                             bool handle_error)
+int find_write_device(struct io_scheduler *io_sched,
+                      struct req_container *reqc,
+                      struct lrs_dev **dev,
+                      size_t index,
+                      bool handle_error)
 {
     pho_req_write_t *wreq = reqc->req->walloc;
     struct media_info **medium =

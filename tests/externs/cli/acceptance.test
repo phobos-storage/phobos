@@ -36,7 +36,9 @@ function setup
 {
     TAGS=foo-tag,bar-tag
     export PHOBOS_IO_SCHED_DIR_read_algo="grouped_read"
+    export PHOBOS_IO_SCHED_DIR_write_algo="grouped_write"
     export PHOBOS_IO_SCHED_TAPE_read_algo="grouped_read"
+    export PHOBOS_IO_SCHED_TAPE_write_algo="grouped_write"
     export PHOBOS_IO_SCHED_TAPE_dispatch_algo="fair_share"
 
     export PHOBOS_IO_SCHED_TAPE_fair_share_lto5_min="0,0,0"
@@ -192,9 +194,9 @@ function dir_setup_bis
     echo "POSIX test mode"
 
     export dirs=(
-                 $(mktemp -d /tmp/test.pho.XXXX)
-                 $(mktemp -d /tmp/test.pho.XXXX)
-                )
+        $(mktemp -d /tmp/test.pho.XXXX)
+        $(mktemp -d /tmp/test.pho.XXXX)
+    )
 
     echo "adding directories ${dirs[@]}"
     $phobos dir add --tags $TAGS ${dirs[0]}
@@ -425,7 +427,7 @@ function put_profile
         error "Put with profile $profile_nonexist_tags should not have worked"
 
     # reset replication count for raid layout
-    export PHOBOS_LAYOUT_RAID1_repl_count=repl_count
+    export PHOBOS_LAYOUT_RAID1_repl_count=$repl_count
 }
 
 function put_profile_lib

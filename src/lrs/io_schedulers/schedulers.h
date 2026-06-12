@@ -29,6 +29,7 @@
 
 extern struct io_scheduler_ops IO_SCHED_FIFO_OPS;
 extern struct io_scheduler_ops IO_SCHED_GROUPED_READ_OPS;
+extern struct io_scheduler_ops IO_SCHED_GROUPED_WRITE_OPS;
 
 /********************************
  * Device dispatcher algorithms *
@@ -94,5 +95,28 @@ struct req_container *round_robin(struct io_sched_handle *io_sched_hdl,
                                   struct req_container *read,
                                   struct req_container *write,
                                   struct req_container *format);
+
+/**
+ * Find a device suitable for a write I/O
+ *
+ * This helper function can be used by I/O schedulers. It tries to
+ * find a device with a mounted or loaded tape first that is compatible
+ * with the write request. If not found, it fetches a medium from the
+ * DSS using the device selection policy and tries to find a device
+ * available for it.
+ *
+ * @param handle_error  whether we are trying to recover from an error.
+ *                      If true, we will try to see if the device is already
+ *                      used for any other medium of this request. If false,
+ *                      we only check up to \p index assuming that the remaining
+ *                      media are not yet allocated. \p index is always ignored
+ *                      in this check as we are trying to allocate a medium at
+ *                      this index.
+ */
+int find_write_device(struct io_scheduler *io_sched,
+                      struct req_container *reqc,
+                      struct lrs_dev **dev,
+                      size_t index,
+                      bool handle_error);
 
 #endif
