@@ -1368,12 +1368,13 @@ static int grouped_retry(struct io_scheduler *io_sched,
          * failed to load.
          */
     } else {
-        sreq->medium_index =
-            read_req_get_medium_index(reqc, &queue_to_use->medium_id);
-    }
+        int rc = read_req_get_medium_index(reqc, &queue_to_use->medium_id);
 
-    if (sreq->medium_index < 0)
-        return sreq->medium_index;
+        if (rc < 0)
+            return sreq->medium_index;
+
+        sreq->medium_index = (size_t) rc;
+    }
 
     if (*dev)
         return 0;
