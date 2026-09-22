@@ -25,6 +25,7 @@ use Getopt::Long qw(:config no_auto_abbrev);
 my $quiet = 0;
 my $tree = 1;
 my $chk_signoff = 1;
+my $chk_commit_msg = 1;
 my $chk_patch = 1;
 my $tst_only;
 my $emacs = 0;
@@ -74,6 +75,7 @@ Options:
   -q, --quiet                quiet
   --no-tree                  run without a kernel tree
   --no-signoff               do not check for 'Signed-off-by' line
+  --no-commit-msg            do not check for commit message
   --patch                    treat FILE as patchfile (default)
   --emacs                    emacs compile window format
   --terse                    one line per report
@@ -199,6 +201,7 @@ GetOptions(
 	'q|quiet+'	=> \$quiet,
 	'tree!'		=> \$tree,
 	'signoff!'	=> \$chk_signoff,
+	'commit-msg!'	=> \$chk_commit_msg,
 	'patch!'	=> \$chk_patch,
 	'emacs!'	=> \$emacs,
 	'terse!'	=> \$terse,
@@ -2544,7 +2547,7 @@ sub process {
 			if ($line !~ /^\s*$/) {
 				$commit_log_lines++;	#could be a $signature
 			}
-		} elsif ($has_commit_log && $commit_log_lines < 2) {
+		} elsif ($has_commit_log && $commit_log_lines < 2 && $chk_commit_msg) {
 			WARN("COMMIT_MESSAGE",
 			     "Missing commit description - Add an appropriate one\n");
 			$commit_log_lines = 2;	#warn only once

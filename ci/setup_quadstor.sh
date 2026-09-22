@@ -13,10 +13,11 @@
 set -xe
 
 # Create a loopback device for storage
-VTL_STORAGE=/tmp/vtl_storage
+VTL_STORAGE=/dev/shm/vtl_storage
 dd if=/dev/zero of=$VTL_STORAGE bs=1M count=14k
 losetup /dev/loop0 $VTL_STORAGE
 mdadm --create /dev/md0 --level=linear --force --raid-devices=1 /dev/loop0
+echo "ReservedPages=25" > /quadstorvtl/etc/coredev.conf
 systemctl restart quadstorvtl
 
 # Create a pool with no dedup (dedup needs at least 11G disk space)

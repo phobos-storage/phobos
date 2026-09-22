@@ -1,0 +1,16 @@
+stages:
+- CI
+
+Non-regression tests:
+    stage: CI
+    rules:
+        - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+        - if: $CI_PIPELINE_SOURCE == "web"
+    variables:
+        GIT_BRANCH: $CI_COMMIT_BRANCH
+        PHOBOS_SOURCE_BRANCH: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
+        PHOBOS_TARGET_BRANCH: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    trigger:
+        project: st/phobos-dev/phobos-ci
+        branch: main
+        strategy: depend
