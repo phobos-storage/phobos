@@ -1314,11 +1314,11 @@ err_nores:
  * locked, full, do not have the put operation flag, do not have the
  * requested tags and do not have the requested grouping.
  */
-static bool medium_is_write_compatible(struct media_info *medium,
-                                       const char *grouping,
-                                       const struct string_array *required_tags,
-                                       const pho_req_write_t *wreq,
-                                       bool empty_medium)
+bool medium_is_write_compatible(struct media_info *medium,
+                                const char *grouping,
+                                const struct string_array *required_tags,
+                                const pho_req_write_t *wreq,
+                                bool empty_medium)
 {
     if (write_avoids_medium(wreq, medium)) {
         pho_debug("Media "FMT_PHO_ID" is in the write allocation avoid list",
