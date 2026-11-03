@@ -237,7 +237,7 @@ function test_raid1_repack
         error "repack should have deleted deprecated objects"
     fi
 
-    nb=$($phobos copy list --uuid ${uuid} | wc -l)
+    nb=$($PSQL -qtc "SELECT COUNT(*) FROM copy WHERE object_uuid = '${uuid}';")
     if [ $nb -ne 0 ]; then
         error "repack should have deleted the copies of the purged object"
     fi
@@ -278,11 +278,10 @@ function test_repack_deprecated_version
         error "repack should only purge the deprecated version on the medium"
     fi
 
-    $phobos undel oid ||
-        error "undel oid1 should have succeeded"
+    $phobos undel oid || error "undel oid should have succeeded"
 
     $phobos get oid /tmp/oid-repack-deprecated-version ||
-        error "get oid1 should have succeeded"
+        error "get oid should have succeeded"
 
     diff /etc/hosts /tmp/oid-repack-deprecated-version ||
         error "file oid-repack-deprecated-version is not correctly retrieved"
