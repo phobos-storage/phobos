@@ -627,11 +627,13 @@ static int _repack_copy_extents(struct admin_handle *adm,
 }
 
 /* Database update: swap each old extent of the source medium for the new
- * extent copied on the target medium.
+ * extent copied on the target medium: ext_cnt_migrated counts the extents
+ * already migrated when the update is interrupted.
  */
 static int _repack_migrate_extents(struct admin_handle *adm,
                                    struct extent *ext_res, int ext_cnt_done,
-                                   GArray *new_ext_uuids)
+                                   GArray *new_ext_uuids,
+                                   int *ext_cnt_migrated)
 {
     int rc;
     int i;
@@ -641,6 +643,8 @@ static int _repack_migrate_extents(struct admin_handle *adm,
                                        g_array_index(new_ext_uuids, char *, i));
         if (rc)
             LOG_RETURN(rc, "Failed to update layouts in DSS");
+
+        (*ext_cnt_migrated)++;
     }
 
     return 0;
@@ -674,6 +678,7 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     ssize_t target_spc_free = 0;
     struct pho_id allocated;
     int ext_cnt_done = 0;
+    int ext_cnt_migrated = 0;
     ssize_t total_size;
     ssize_t target_spc_needed;
     ssize_t source_phys_spc_used;
@@ -818,7 +823,8 @@ release:
     if (rc)
         LOG_GOTO(free_all, rc, "Failed to release media after repack");
 
-    rc = _repack_migrate_extents(adm, ext_res, ext_cnt_done, new_ext_uuids);
+    rc = _repack_migrate_extents(adm, ext_res, ext_cnt_done, new_ext_uuids,
+                                 &ext_cnt_migrated);
     if (rc)
         goto free_all;
 
@@ -879,10 +885,12 @@ free_all:
                       "uncertain", PHO_ID(*source));
     }
 
-    if (new_ext_uuids) {
+    if (new_ext_uuids && (int)new_ext_uuids->len > ext_cnt_migrated) {
         rc2 = dss_update_extent_state(&adm->dss,
-                                      (const char **)new_ext_uuids->data,
-                                      (int)new_ext_uuids->len,
+                                      (const char **)new_ext_uuids->data +
+                                          ext_cnt_migrated,
+                                      (int)(new_ext_uuids->len -
+                                            ext_cnt_migrated),
                                       PHO_EXT_ST_ORPHAN);
         if (rc2)
             pho_error(rc2,
