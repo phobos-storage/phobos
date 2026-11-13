@@ -157,6 +157,15 @@ function test_simple_repack
     $valg_phobos tape repack $medium_origin &&
         error "Repack should have failed"
 
+    state=$($phobos tape list -o adm_status $medium_origin)
+    if [ "$state" != "locked" ]; then
+        error "failed repack should leave the source medium locked"
+    fi
+
+    # The source medium is still locked: a retry must not succeed
+    $phobos $family repack $medium_origin &&
+        error "Repack retry should have failed"
+
     $phobos tape unlock $medium_origin_bis
     $phobos tape unlock $medium_origin
 
@@ -190,6 +199,11 @@ function test_simple_repack
     state=$($phobos $family list -o fs.status $medium_origin)
     if [ "$state" != "empty" ]; then
         error "repack should format source medium"
+    fi
+
+    state=$($phobos $family list -o adm_status $medium_origin)
+    if [ "$state" != "unlocked" ]; then
+        error "repack should unlock source medium on success"
     fi
 }
 
@@ -650,6 +664,38 @@ function test_orphan_repack
     fi
 }
 
+function test_no_live_extent_repack
+{
+    local family=$1
+
+    # Delete the remaining objects and their layouts: only orphan extents
+    # are left on the source medium, it has no live extent anymore
+    for oid in oid-repack-1 oid-repack-3 oid-repack-4; do
+        uuid=$($phobos object list -o uuid $oid)
+        $PSQL -qc "DELETE FROM object WHERE object_uuid='${uuid}';"
+        $PSQL -qc "DELETE FROM layout WHERE object_uuid='${uuid}';"
+    done
+    # oid-repack-2 is already deprecated: the garbage collector will
+    # orphan its extent
+
+    $phobos $family repack $medium_origin
+
+    nb=$($phobos extent list --name $medium_origin | wc -l)
+    if [ $nb -ne 0 ]; then
+        error "repack should have removed all extents of the source medium"
+    fi
+
+    state=$($phobos $family list -o fs.status $medium_origin)
+    if [ "$state" != "empty" ]; then
+        error "repack should format source medium"
+    fi
+
+    state=$($phobos $family list -o adm_status $medium_origin)
+    if [ "$state" != "unlocked" ]; then
+        error "repack should unlock source medium with no live extent"
+    fi
+}
+
 function test_dedup_repack_setup
 {
     setup
@@ -910,6 +956,7 @@ TESTS=("tape_setup;test_simple_repack tape;tape_cleanup"
        "test_target_repack_setup;test_spc_cap_repack;tape_cleanup"
        "test_raid4_repack_setup;test_raid4_repack;tape_cleanup"
        "tape_setup;test_orphan_repack tape;tape_cleanup"
+       "tape_setup;test_no_live_extent_repack tape;tape_cleanup"
        "test_dedup_repack_setup;test_dedup_repack tape;tape_cleanup"
        "tape_setup;test_tags_repack;tape_cleanup"
        "tape_setup;test_tags_empty_repack;tape_cleanup"
