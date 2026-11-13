@@ -61,11 +61,14 @@ static int _get_source_medium(struct admin_handle *adm,
                               struct pho_ext_loc *loc,
                               struct pho_io_descr *iod,
                               struct io_adapter_module **ioa,
-                              enum fs_type *fs_type)
+                              enum fs_type *fs_type,
+                              bool *allocated)
 {
     pho_resp_t *resp;
     pho_req_t req;
     int rc;
+
+    *allocated = false;
 
     pho_srl_request_read_alloc(&req, 1);
     req.id = 1;
@@ -87,6 +90,11 @@ static int _get_source_medium(struct admin_handle *adm,
         LOG_GOTO(free_resp, rc = -EBADMSG,
                  "Bad response for read allocation: ID #%d - '%s'",
                  resp->req_id, pho_srl_response_kind_str(resp));
+
+    /* The LRS granted the read allocation: report it even if the local
+     * initialization below fails, so that the caller releases the medium.
+     */
+    *allocated = true;
 
     *fs_type = (enum fs_type)resp->ralloc->media[0]->fs_type;
     rc = get_io_adapter(*fs_type, ioa);
@@ -240,6 +248,31 @@ free_resp:
     pho_srl_response_free(resp, true);
 
     return rc;
+}
+
+/* Release the media allocated for the repack: the target, if any, with
+ * the size and the number of the extents written on it to update its
+ * stats, and the source, which was only read. The LRS does not answer a
+ * release without any medium to sync: a source-only release is sent
+ * without waiting for an answer.
+ */
+static int _repack_release_media(struct admin_handle *adm,
+                                 const struct pho_id *source,
+                                 const struct pho_io_descr *iod_source,
+                                 bool target_allocated,
+                                 const struct pho_id *allocated,
+                                 const struct pho_io_descr *iod_target,
+                                 struct extent *ext_res,
+                                 int ext_cnt_done)
+{
+    if (!target_allocated)
+        return _send_and_recv_release(adm, source, iod_source, 3,
+                                      NULL, NULL, 0, 0);
+
+    return _send_and_recv_release(adm, source, iod_source, 3, allocated,
+                                  iod_target,
+                                  _sum_extent_size(ext_res, ext_cnt_done),
+                                  ext_cnt_done);
 }
 
 static int _build_new_extent(const struct pho_id *target,
@@ -454,6 +487,32 @@ static int _extent_layout_attr_names(struct io_adapter_module *ioa,
     return rc;
 }
 
+/* Update the administrative status of the source medium in the DSS and
+ * notify the LRS of the change: dss_updated is set once the DSS reflects
+ * the new status, before the LRS is notified.
+ */
+static int _repack_set_medium_adm_status(struct admin_handle *adm,
+                                         const struct pho_id *source,
+                                         enum rsc_adm_status status,
+                                         bool *dss_updated)
+{
+    struct media_info medium = {0};
+    int rc;
+
+    *dss_updated = false;
+
+    pho_id_copy(&medium.rsc.id, source);
+    medium.rsc.adm_status = status;
+
+    rc = dss_media_update(&adm->dss, &medium, &medium, 1, ADM_STATUS);
+    if (rc)
+        return rc;
+
+    *dss_updated = true;
+
+    return phobos_admin_notify_media_update(adm, &medium.rsc.id, 1, NULL);
+}
+
 /* A medium must not receive a copy of the data it already holds: when
  * the LRS selects the target itself, compile the list of media that
  * cannot be used as repack target, and when the target is explicitly
@@ -610,7 +669,7 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     struct pho_id *avoid_media = NULL;
     struct string_array *ptr_tags;
     struct extent *ext_res = NULL;
-    struct string_array src_tags;
+    struct string_array src_tags = {0};
     GArray *new_ext_uuids = NULL;
     ssize_t target_spc_free = 0;
     struct pho_id allocated;
@@ -619,8 +678,14 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     ssize_t target_spc_needed;
     ssize_t source_phys_spc_used;
     int avoid_cnt = 0;
-    int ext_cnt;
+    int ext_cnt = 0;
+    bool source_allocated = false;
+    bool source_locked = false;
+    bool source_unlocked = false;
+    bool target_allocated = false;
+    bool release_done = false;
     int rc;
+    int rc2;
 
     if (source->family != PHO_RSC_TAPE)
         LOG_RETURN(-ENOTSUP, "Repack operation is only available for tapes");
@@ -645,28 +710,51 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
             return rc;
     }
 
+    /* Reserve the source through the LRS before any DSS access to its
+     * extents, so that no other client can be allocated it while the
+     * repack snapshots and moves its data.
+     */
+    rc = _get_source_medium(adm, source, &loc_source, &iod_source, &ioa,
+                            &source_fs_type, &source_allocated);
+    if (rc)
+        LOG_GOTO(free_all, rc, "Failed to reserve "FMT_PHO_ID" for repack",
+                 PHO_ID(*source));
+
+    /* Administratively lock the source while holding its read allocation:
+     * this fences new allocations from other clients.
+     */
+    rc = _repack_set_medium_adm_status(adm, source, PHO_RSC_ADM_ST_LOCKED,
+                                       &source_locked);
+    if (rc)
+        /* If the DSS was updated but the LRS could not be notified, its
+         * view of the medium may be stale: stop before the garbage
+         * collection, the medium stays locked.
+         */
+        LOG_GOTO(free_all, rc, "Failed to lock "FMT_PHO_ID" in the DSS or "
+                 "to notify the LRS", PHO_ID(*source));
+
     /* Invoke garbage collector for source tape */
     rc = dss_update_gc_for_tape(&adm->dss, source);
     if (rc)
-        return rc;
+        goto free_all;
 
     /* Determine total size of live objects */
     rc = get_extents_from_medium(adm, source, &ext_res, &ext_cnt, true,
                                  &sort);
     if (rc)
-        return rc;
+        goto free_all;
 
     rc = _retrieve_source_info(adm, source, &src_tags,
                                source_fs_type == PHO_FS_INVAL ?
                                   &source_fs_type : NULL,
                                &source_phys_spc_used);
     if (rc)
-        LOG_GOTO(free_ext, rc,
+        LOG_GOTO(free_all, rc,
                  "Failed to retrieve info for "FMT_PHO_ID, PHO_ID(*source));
 
     total_size = _sum_extent_size(ext_res, ext_cnt);
     if (total_size == 0)
-        goto format;
+        goto release;
 
     /* Cap the space required on the target medium by the physical space
      * the data occupies on the source medium: the logical size of the
@@ -676,7 +764,7 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     target_spc_needed = min(total_size, source_phys_spc_used);
 
     if (target != NULL && target_spc_free <= target_spc_needed)
-        LOG_GOTO(free_tags, rc = -ENOSPC,
+        LOG_GOTO(free_all, rc = -ENOSPC,
                  "Target tape '%s' does not have enough free space (%zd) to "
                  "hold the data of the repacked tape (%zd)", target->name,
                  target_spc_free, target_spc_needed);
@@ -684,13 +772,7 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
     rc = _repack_target_check(adm, source, target, &target_medium, empty,
                               ignore_layout_check, &avoid_media, &avoid_cnt);
     if (rc)
-        goto free_tags;
-
-    /* Prepare read allocation */
-    rc = _get_source_medium(adm, source, &loc_source, &iod_source, &ioa,
-                            &source_fs_type);
-    if (rc)
-        goto free_tags;
+        goto free_all;
 
     /* Prepare write allocation */
     if (target != NULL)
@@ -711,60 +793,106 @@ int phobos_admin_repack(struct admin_handle *adm, const struct pho_id *source,
                             target != NULL ? NULL : avoid_media,
                             target != NULL ? 0 : avoid_cnt,
                             &loc_target, &iod_target, &allocated);
-    if (rc) {
-        free(loc_source.root_path);
+    if (rc)
+        goto free_all;
 
-        _send_and_recv_release(adm, source, &iod_source, 3, NULL, NULL, 0, 0);
-        goto free_tags;
-    }
+    target_allocated = true;
 
     new_ext_uuids = g_array_new(FALSE, TRUE, sizeof(ext_res[0].uuid));
 
     rc = _repack_copy_extents(adm, ioa, ext_res, ext_cnt, &iod_source,
                               &iod_target, &allocated, new_ext_uuids,
                               &ext_cnt_done);
-    free(loc_target.root_path);
-    free(loc_source.root_path);
 
     if (rc)
-        LOG_GOTO(free_ext, rc, "Error encountered, repack is interrupted");
+        LOG_GOTO(free_all, rc, "Error encountered, repack is interrupted");
 
-    rc = _send_and_recv_release(adm, source, &iod_source, 3,
-                                &allocated, &iod_target,
-                                ext_cnt_done == ext_cnt ?
-                                    total_size :
-                                    _sum_extent_size(ext_res, ext_cnt_done),
-                                ext_cnt_done);
+release:
+    /* Definitive release of the allocated media, without unlocking the
+     * source. Never send it twice: an ambiguous outcome is not a success.
+     */
+    release_done = true;
+    rc = _repack_release_media(adm, source, &iod_source, target_allocated,
+                               &allocated, &iod_target, ext_res,
+                               ext_cnt_done);
     if (rc)
-        LOG_GOTO(free_ext, rc, "Failed to send/receive release");
+        LOG_GOTO(free_all, rc, "Failed to release media after repack");
 
     rc = _repack_migrate_extents(adm, ext_res, ext_cnt_done, new_ext_uuids);
     if (rc)
-        goto free_ext;
+        goto free_all;
 
-    g_array_free(new_ext_uuids, TRUE);
-    new_ext_uuids = NULL;
+    /* The new extents are referenced by the layouts now: free_all must
+     * not orphan them on a later failure. The array is only allocated
+     * when extents were copied.
+     */
+    if (new_ext_uuids) {
+        g_array_free(new_ext_uuids, TRUE);
+        new_ext_uuids = NULL;
+    }
 
-format:
-    rc = phobos_admin_format(adm, source, 1, 1, source_fs_type, true, true);
+    /* The source stays administratively locked during the format: only a
+     * fully successful repack unlocks it, after the DSS cleanup.
+     */
+    rc = phobos_admin_format(adm, source, 1, 1, source_fs_type, false,
+                             true);
     if (rc)
-        LOG_GOTO(free_ext, rc,
+        LOG_GOTO(free_all, rc,
                  "Failed to format "FMT_PHO_ID, PHO_ID(*source));
 
     rc = _clean_database_following_format(adm, source);
+    if (rc)
+        goto free_all;
 
-free_ext:
-    if (new_ext_uuids) {
-        rc = dss_update_extent_state(&adm->dss,
-                                     (const char **)new_ext_uuids->data,
-                                     (int)new_ext_uuids->len,
-                                     PHO_EXT_ST_ORPHAN);
-        g_array_free(new_ext_uuids, TRUE);
-        if (rc)
-            pho_error(rc, "Failed to update state of new extents to orphan");
+    /* Full success: unlock the source and notify the LRS owning it. */
+    rc = _repack_set_medium_adm_status(adm, source,
+                                       PHO_RSC_ADM_ST_UNLOCKED,
+                                       &source_unlocked);
+    if (rc && !source_unlocked)
+        LOG_GOTO(free_all, rc,
+                 "Failed to unlock "FMT_PHO_ID" after repack",
+                 PHO_ID(*source));
+    if (rc)
+        pho_error(rc, "Failed to notify the LRS of the unlock of "
+                  FMT_PHO_ID": the LRS may keep refusing the medium until "
+                  "its cache is refreshed", PHO_ID(*source));
+
+free_all:
+    /* Fail closed: a source locked by this repack is only unlocked on
+     * full success, an operator may have to check and unlock it.
+     */
+    if (rc && source_locked && !source_unlocked)
+        pho_error(rc, "Repack of "FMT_PHO_ID" failed: the source medium "
+                  "is left administratively locked, an operator may have "
+                  "to check and unlock it", PHO_ID(*source));
+
+    /* Best effort release of the media still held. Do not mask the
+     * original error, and never assume an ambiguous release succeeded.
+     */
+    if (source_allocated && !release_done) {
+        rc2 = _repack_release_media(adm, source, &iod_source,
+                                    target_allocated, &allocated,
+                                    &iod_target, ext_res, ext_cnt_done);
+        if (rc2)
+            pho_error(rc2, "Failed to release "FMT_PHO_ID" after repack "
+                      "error: the state of its LRS allocation is "
+                      "uncertain", PHO_ID(*source));
     }
 
-free_tags:
+    if (new_ext_uuids) {
+        rc2 = dss_update_extent_state(&adm->dss,
+                                      (const char **)new_ext_uuids->data,
+                                      (int)new_ext_uuids->len,
+                                      PHO_EXT_ST_ORPHAN);
+        if (rc2)
+            pho_error(rc2,
+                      "Failed to update state of new extents to orphan");
+    }
+
+    if (new_ext_uuids)
+        g_array_free(new_ext_uuids, TRUE);
+    free(loc_target.root_path);
+    free(loc_source.root_path);
     free(avoid_media);
     string_array_free(&src_tags);
     dss_res_free(ext_res, ext_cnt);

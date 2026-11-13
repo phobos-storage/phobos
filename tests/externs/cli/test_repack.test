@@ -158,6 +158,7 @@ function test_simple_repack
         error "Repack should have failed"
 
     $phobos tape unlock $medium_origin_bis
+    $phobos tape unlock $medium_origin
 
     # Make 'alt' medium not empty to prevent its selection for repack
     $phobos put -T alt /etc/hosts oid5
@@ -341,6 +342,9 @@ function test_used_medium_repack
     $valg_phobos tape repack --empty -T "" $medium_origin &&
         error "repack should have failed: no empty tape is available"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     $valg_phobos tape repack -T "" $medium_origin ||
         error "repack to a used medium holding no copy of the data should have succeed"
 
@@ -426,8 +430,13 @@ function test_target_repack
     echo "$repack_output" | grep -q -- "--empty is ignored" ||
         error "a message should have said that --empty is ignored"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     $valg_phobos tape repack --target $medium_target $medium_origin &&
         error "repack to a target medium holding a copy should have failed"
+
+    $phobos tape unlock $medium_origin
 
     $valg_phobos tape repack --target $medium_target --ignore-check $medium_origin ||
         error "repack to the requested target medium should have succeed"
@@ -500,6 +509,9 @@ EOF
     echo "$repack_output" | grep -q "does not have enough free space" ||
         error "the refusal message should be about the free space"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     # The physical usage of the source medium is now set to half the
     # logical size, as a compressing filesystem would report it: the space
     # request capped by the physical usage fits the target medium.
@@ -557,9 +569,14 @@ function test_raid4_repack
     $valg_phobos tape repack -T "" $medium_origin &&
         error "repack should have failed: all other media hold a part of the repacked data"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     # A target medium holding a part of the repacked data is refused
     $valg_phobos tape repack --target $medium_target $medium_origin &&
         error "repack to a target medium holding a part of the data should have failed"
+
+    $phobos tape unlock $medium_origin
 
     # The target medium is accepted once the check is explicitly ignored:
     # the part of the data it already holds is then duplicated on it
@@ -710,6 +727,7 @@ function test_tags_repack
         error "Repack should have failed"
 
     $phobos tape unlock $medium_alt
+    $phobos tape unlock $medium_origin
     $valg_phobos tape repack -T alt $medium_origin ||
         error "Repack should have succeed"
 
@@ -742,6 +760,7 @@ function test_tags_empty_repack
     $phobos tape unlock $medium_other
     $phobos tape unlock $medium_origin_bis
     $phobos tape unlock $medium_alt
+    $phobos tape unlock $medium_origin
     $valg_phobos tape repack -T "" $medium_origin ||
         error "Repack should have succeed"
 
