@@ -157,7 +157,17 @@ function test_simple_repack
     $valg_phobos tape repack $medium_origin &&
         error "Repack should have failed"
 
+    state=$($phobos tape list -o adm_status $medium_origin)
+    if [ "$state" != "locked" ]; then
+        error "failed repack should leave the source medium locked"
+    fi
+
+    # The source medium is still locked: a retry must not succeed
+    $phobos $family repack $medium_origin &&
+        error "Repack retry should have failed"
+
     $phobos tape unlock $medium_origin_bis
+    $phobos tape unlock $medium_origin
 
     # Make 'alt' medium not empty to prevent its selection for repack
     $phobos put -T alt /etc/hosts oid5
@@ -189,6 +199,11 @@ function test_simple_repack
     state=$($phobos $family list -o fs.status $medium_origin)
     if [ "$state" != "empty" ]; then
         error "repack should format source medium"
+    fi
+
+    state=$($phobos $family list -o adm_status $medium_origin)
+    if [ "$state" != "unlocked" ]; then
+        error "repack should unlock source medium on success"
     fi
 }
 
@@ -341,6 +356,9 @@ function test_used_medium_repack
     $valg_phobos tape repack --empty -T "" $medium_origin &&
         error "repack should have failed: no empty tape is available"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     $valg_phobos tape repack -T "" $medium_origin ||
         error "repack to a used medium holding no copy of the data should have succeed"
 
@@ -426,8 +444,13 @@ function test_target_repack
     echo "$repack_output" | grep -q -- "--empty is ignored" ||
         error "a message should have said that --empty is ignored"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     $valg_phobos tape repack --target $medium_target $medium_origin &&
         error "repack to a target medium holding a copy should have failed"
+
+    $phobos tape unlock $medium_origin
 
     $valg_phobos tape repack --target $medium_target --ignore-check $medium_origin ||
         error "repack to the requested target medium should have succeed"
@@ -500,6 +523,9 @@ EOF
     echo "$repack_output" | grep -q "does not have enough free space" ||
         error "the refusal message should be about the free space"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     # The physical usage of the source medium is now set to half the
     # logical size, as a compressing filesystem would report it: the space
     # request capped by the physical usage fits the target medium.
@@ -557,9 +583,14 @@ function test_raid4_repack
     $valg_phobos tape repack -T "" $medium_origin &&
         error "repack should have failed: all other media hold a part of the repacked data"
 
+    # The failed repack left the source medium administratively locked
+    $phobos tape unlock $medium_origin
+
     # A target medium holding a part of the repacked data is refused
     $valg_phobos tape repack --target $medium_target $medium_origin &&
         error "repack to a target medium holding a part of the data should have failed"
+
+    $phobos tape unlock $medium_origin
 
     # The target medium is accepted once the check is explicitly ignored:
     # the part of the data it already holds is then duplicated on it
@@ -630,6 +661,38 @@ function test_orphan_repack
     nb=$($phobos object list --deprecated-only | wc -l)
     if [ $nb -ne 0 ]; then
         error "repack should have deleted deprecated objects"
+    fi
+}
+
+function test_no_live_extent_repack
+{
+    local family=$1
+
+    # Delete the remaining objects and their layouts: only orphan extents
+    # are left on the source medium, it has no live extent anymore
+    for oid in oid-repack-1 oid-repack-3 oid-repack-4; do
+        uuid=$($phobos object list -o uuid $oid)
+        $PSQL -qc "DELETE FROM object WHERE object_uuid='${uuid}';"
+        $PSQL -qc "DELETE FROM layout WHERE object_uuid='${uuid}';"
+    done
+    # oid-repack-2 is already deprecated: the garbage collector will
+    # orphan its extent
+
+    $phobos $family repack $medium_origin
+
+    nb=$($phobos extent list --name $medium_origin | wc -l)
+    if [ $nb -ne 0 ]; then
+        error "repack should have removed all extents of the source medium"
+    fi
+
+    state=$($phobos $family list -o fs.status $medium_origin)
+    if [ "$state" != "empty" ]; then
+        error "repack should format source medium"
+    fi
+
+    state=$($phobos $family list -o adm_status $medium_origin)
+    if [ "$state" != "unlocked" ]; then
+        error "repack should unlock source medium with no live extent"
     fi
 }
 
@@ -710,6 +773,7 @@ function test_tags_repack
         error "Repack should have failed"
 
     $phobos tape unlock $medium_alt
+    $phobos tape unlock $medium_origin
     $valg_phobos tape repack -T alt $medium_origin ||
         error "Repack should have succeed"
 
@@ -742,6 +806,7 @@ function test_tags_empty_repack
     $phobos tape unlock $medium_other
     $phobos tape unlock $medium_origin_bis
     $phobos tape unlock $medium_alt
+    $phobos tape unlock $medium_origin
     $valg_phobos tape repack -T "" $medium_origin ||
         error "Repack should have succeed"
 
@@ -891,6 +956,7 @@ TESTS=("tape_setup;test_simple_repack tape;tape_cleanup"
        "test_target_repack_setup;test_spc_cap_repack;tape_cleanup"
        "test_raid4_repack_setup;test_raid4_repack;tape_cleanup"
        "tape_setup;test_orphan_repack tape;tape_cleanup"
+       "tape_setup;test_no_live_extent_repack tape;tape_cleanup"
        "test_dedup_repack_setup;test_dedup_repack tape;tape_cleanup"
        "tape_setup;test_tags_repack;tape_cleanup"
        "tape_setup;test_tags_empty_repack;tape_cleanup"
